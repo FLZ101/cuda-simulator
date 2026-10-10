@@ -169,5 +169,87 @@ int main(int argc, char **argv) {
     return 0;
   }
 
+  if (mode == "relu") {
+    if (argc != 5) {
+      return 17;
+    }
+    const std::string in_path = argv[2];
+    const std::string out_path = argv[3];
+    const int n = std::stoi(argv[4]);
+    std::vector<float> input = read_floats(in_path);
+    if (input.size() != static_cast<std::size_t>(n)) {
+      return 18;
+    }
+    const std::size_t bytes = input.size() * sizeof(float);
+    CUdeviceptr d_in = 0;
+    CUdeviceptr d_out = 0;
+    if (cuMemAlloc(&d_in, bytes) != CUDA_SUCCESS ||
+        cuMemAlloc(&d_out, bytes) != CUDA_SUCCESS) {
+      return 19;
+    }
+    if (cuMemcpyHtoD(d_in, input.data(), bytes) != CUDA_SUCCESS) {
+      return 20;
+    }
+    int count = n;
+    std::vector<void *> params = {&d_in, &d_out, &count};
+    const unsigned int block = 256;
+    const unsigned int grid =
+        (static_cast<unsigned int>(n) + block - 1) / block;
+    if (!run_kernel(RELU_PTX_PATH, "relu", params, grid, block)) {
+      return 21;
+    }
+    std::vector<float> output(static_cast<std::size_t>(n));
+    if (cuMemcpyDtoH(output.data(), d_out, bytes) != CUDA_SUCCESS) {
+      return 22;
+    }
+    if (!write_floats(out_path, output)) {
+      return 23;
+    }
+    cuMemFree(d_in);
+    cuMemFree(d_out);
+    return 0;
+  }
+
+  if (mode == "gelu") {
+    if (argc != 5) {
+      return 24;
+    }
+    const std::string in_path = argv[2];
+    const std::string out_path = argv[3];
+    const int n = std::stoi(argv[4]);
+    std::vector<float> input = read_floats(in_path);
+    if (input.size() != static_cast<std::size_t>(n)) {
+      return 25;
+    }
+    const std::size_t bytes = input.size() * sizeof(float);
+    CUdeviceptr d_in = 0;
+    CUdeviceptr d_out = 0;
+    if (cuMemAlloc(&d_in, bytes) != CUDA_SUCCESS ||
+        cuMemAlloc(&d_out, bytes) != CUDA_SUCCESS) {
+      return 26;
+    }
+    if (cuMemcpyHtoD(d_in, input.data(), bytes) != CUDA_SUCCESS) {
+      return 27;
+    }
+    int count = n;
+    std::vector<void *> params = {&d_in, &d_out, &count};
+    const unsigned int block = 256;
+    const unsigned int grid =
+        (static_cast<unsigned int>(n) + block - 1) / block;
+    if (!run_kernel(GELU_PTX_PATH, "gelu", params, grid, block)) {
+      return 28;
+    }
+    std::vector<float> output(static_cast<std::size_t>(n));
+    if (cuMemcpyDtoH(output.data(), d_out, bytes) != CUDA_SUCCESS) {
+      return 29;
+    }
+    if (!write_floats(out_path, output)) {
+      return 30;
+    }
+    cuMemFree(d_in);
+    cuMemFree(d_out);
+    return 0;
+  }
+
   return 16;
 }

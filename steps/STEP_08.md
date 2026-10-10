@@ -62,6 +62,10 @@ pass within the configured tolerance.
 - files: `tests/kernels/*.cu`, `tests/CMakeLists.txt`
 - verification: `make test` passed and all generated PTX passed the SIMT gate.
 
+- Added GPU-reference differential execution for `copy`, `saxpy`, `relu`, and `gelu` using the real GPU as the golden output.
+- files: `tests/kernels/demo_runner.cpp`, `tests/kernels/run_demos.py`, `tests/CMakeLists.txt`
+- verification: `make test` passed all 19 tests.
+
 ## Verification
 
 Commands run:

@@ -242,10 +242,17 @@ target_link_libraries(demo_runner PRIVATE cuda_shim)
 target_compile_definitions(demo_runner PRIVATE
   COPY_PTX_PATH="${GENERATED_COPY_PTX}"
   SAXPY_PTX_PATH="${GENERATED_SAXPY_PTX}"
+  RELU_PTX_PATH="${GENERATED_RELU_PTX}"
+  GELU_PTX_PATH="${GENERATED_PTX_DIR}/gelu.ptx"
 )
 cudasim_set_warnings(demo_runner)
 cudasim_apply_sanitizers(demo_runner)
-add_dependencies(demo_runner generate_copy_ptx generate_saxpy_ptx)
+add_dependencies(demo_runner
+  generate_copy_ptx
+  generate_saxpy_ptx
+  generate_relu_ptx
+  generate_gelu_ptx
+)
 add_test(
   NAME kernels.demo_differential
   COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/kernels/run_demos.py
