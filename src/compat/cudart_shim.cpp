@@ -1,10 +1,12 @@
 #include "compat/cuda_api.h"
 #include "compat/export.h"
 #include "core/compat_state.h"
+#include "runtime/runtime.h"
 
 #include <atomic>
 #include <cstddef>
 #include <cstring>
+#include <memory>
 
 namespace {
 
@@ -38,6 +40,27 @@ void fill_device_properties(cudaDeviceProp *props) {
   props->clockRate = info.clock_rate;
   props->totalGlobalMem = info.total_global_mem;
   props->integrated = info.integrated;
+}
+
+std::shared_ptr<cudasim::runtime::Stream> get_stream(cudaStream_t stream) {
+  const auto handle = reinterpret_cast<std::uintptr_t>(stream);
+  if (handle == 0) {
+    return {};
+  }
+  try {
+    return cudasim::runtime::StreamManager::instance().get(handle);
+  } catch (...) {
+    return {};
+  }
+}
+
+std::shared_ptr<cudasim::runtime::Event> get_event(cudaEvent_t event) {
+  const auto handle = reinterpret_cast<std::uintptr_t>(event);
+  try {
+    return cudasim::runtime::EventManager::instance().get(handle);
+  } catch (...) {
+    return {};
+  }
 }
 
 } // namespace
@@ -161,8 +184,12 @@ CUDASIM_EXTERN_C CUDASIM_API cudaError_t cudaMemcpyAsync(void *dst,
                                                          std::size_t count,
                                                          cudaMemcpyKind kind,
                                                          cudaStream_t stream) {
-  (void)stream;
-  return cudaMemcpy(dst, src, count, kind);
+  auto runtime_stream = get_stream(stream);
+  if (!runtime_stream) {
+    return cudaMemcpy(dst, src, count, kind);
+  }
+  runtime_stream->submit_copy(dst, src, count);
+  return result(true, cudaSuccess);
 }
 
 CUDASIM_EXTERN_C CUDASIM_API cudaError_t cudaMemset(void *dst, int value,
@@ -177,8 +204,12 @@ CUDASIM_EXTERN_C CUDASIM_API cudaError_t cudaMemset(void *dst, int value,
 CUDASIM_EXTERN_C CUDASIM_API cudaError_t cudaMemsetAsync(void *dst, int value,
                                                          std::size_t count,
                                                          cudaStream_t stream) {
-  (void)stream;
-  return cudaMemset(dst, value, count);
+  auto runtime_stream = get_stream(stream);
+  if (!runtime_stream) {
+    return cudaMemset(dst, value, count);
+  }
+  runtime_stream->submit_memset(dst, value, count);
+  return result(true, cudaSuccess);
 }
 
 CUDASIM_EXTERN_C CUDASIM_API cudaError_t
@@ -301,7 +332,8 @@ cudaStreamCreate(cudaStream_t *stream) {
   if (stream == nullptr) {
     return result(false, cudaErrorInvalidValue);
   }
-  *stream = reinterpret_cast<void *>(g_handle_counter.fetch_add(1));
+  auto created = cudasim::runtime::StreamManager::instance().create();
+  *stream = reinterpret_cast<void *>(created->id());
   return result(true, cudaSuccess);
 }
 
@@ -320,26 +352,54 @@ CUDASIM_EXTERN_C CUDASIM_API cudaError_t cudaStreamCreateWithPriority(
 
 CUDASIM_EXTERN_C CUDASIM_API cudaError_t
 cudaStreamDestroy(cudaStream_t stream) {
-  (void)stream;
+  const auto handle = reinterpret_cast<std::uintptr_t>(stream);
+  if (handle != 0) {
+    cudasim::runtime::StreamManager::instance().destroy(handle);
+  }
   return result(true, cudaSuccess);
 }
 
 CUDASIM_EXTERN_C CUDASIM_API cudaError_t
 cudaStreamSynchronize(cudaStream_t stream) {
-  (void)stream;
+  if (stream == nullptr) {
+    cudasim::runtime::StreamManager::instance().synchronize_all();
+    return result(true, cudaSuccess);
+  }
+  auto runtime_stream = get_stream(stream);
+  if (!runtime_stream) {
+    return result(false, cudaErrorInvalidResourceHandle);
+  }
+  runtime_stream->synchronize();
   return result(true, cudaSuccess);
 }
 
 CUDASIM_EXTERN_C CUDASIM_API cudaError_t cudaStreamQuery(cudaStream_t stream) {
-  (void)stream;
+  if (stream == nullptr) {
+    cudasim::runtime::StreamManager::instance().synchronize_all();
+    return result(true, cudaSuccess);
+  }
+  auto runtime_stream = get_stream(stream);
+  if (!runtime_stream) {
+    return result(false, cudaErrorInvalidResourceHandle);
+  }
+  if (!runtime_stream->query()) {
+    return result(false, cudaErrorNotSupported);
+  }
   return result(true, cudaSuccess);
 }
 
 CUDASIM_EXTERN_C CUDASIM_API cudaError_t cudaStreamWaitEvent(
     cudaStream_t stream, cudaEvent_t event, unsigned int flags) {
-  (void)stream;
-  (void)event;
   (void)flags;
+  auto runtime_event = get_event(event);
+  if (!runtime_event) {
+    return result(false, cudaErrorInvalidResourceHandle);
+  }
+  auto runtime_stream = get_stream(stream);
+  if (!runtime_stream) {
+    return result(false, cudaErrorInvalidResourceHandle);
+  }
+  runtime_stream->submit_wait(runtime_event);
   return result(true, cudaSuccess);
 }
 
@@ -347,7 +407,8 @@ CUDASIM_EXTERN_C CUDASIM_API cudaError_t cudaEventCreate(cudaEvent_t *event) {
   if (event == nullptr) {
     return result(false, cudaErrorInvalidValue);
   }
-  *event = reinterpret_cast<void *>(g_handle_counter.fetch_add(1));
+  auto created = cudasim::runtime::EventManager::instance().create();
+  *event = reinterpret_cast<void *>(created->id());
   return result(true, cudaSuccess);
 }
 
@@ -358,25 +419,44 @@ cudaEventCreateWithFlags(cudaEvent_t *event, unsigned int flags) {
 }
 
 CUDASIM_EXTERN_C CUDASIM_API cudaError_t cudaEventDestroy(cudaEvent_t event) {
-  (void)event;
+  cudasim::runtime::EventManager::instance().destroy(
+      reinterpret_cast<std::uintptr_t>(event));
   return result(true, cudaSuccess);
 }
 
 CUDASIM_EXTERN_C CUDASIM_API cudaError_t cudaEventRecord(cudaEvent_t event,
                                                          cudaStream_t stream) {
-  (void)event;
-  (void)stream;
+  auto runtime_event = get_event(event);
+  if (!runtime_event) {
+    return result(false, cudaErrorInvalidResourceHandle);
+  }
+  auto runtime_stream = get_stream(stream);
+  if (!runtime_stream) {
+    runtime_event->record();
+  } else {
+    runtime_stream->submit_event(runtime_event);
+  }
   return result(true, cudaSuccess);
 }
 
 CUDASIM_EXTERN_C CUDASIM_API cudaError_t
 cudaEventSynchronize(cudaEvent_t event) {
-  (void)event;
+  auto runtime_event = get_event(event);
+  if (!runtime_event) {
+    return result(false, cudaErrorInvalidResourceHandle);
+  }
+  runtime_event->wait();
   return result(true, cudaSuccess);
 }
 
 CUDASIM_EXTERN_C CUDASIM_API cudaError_t cudaEventQuery(cudaEvent_t event) {
-  (void)event;
+  auto runtime_event = get_event(event);
+  if (!runtime_event) {
+    return result(false, cudaErrorInvalidResourceHandle);
+  }
+  if (!runtime_event->is_recorded()) {
+    return result(false, cudaErrorNotSupported);
+  }
   return result(true, cudaSuccess);
 }
 
@@ -445,6 +525,7 @@ cudaOccupancyMaxActiveBlocksPerMultiprocessor(int *num_blocks, const void *func,
 }
 
 CUDASIM_EXTERN_C CUDASIM_API cudaError_t cudaDeviceSynchronize() {
+  cudasim::runtime::StreamManager::instance().synchronize_all();
   return result(true, cudaSuccess);
 }
 

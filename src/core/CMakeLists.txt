@@ -7,6 +7,12 @@ configure_file(
 add_library(cudasim_core SHARED
   compat_state.cpp
   version.cpp
+  ../runtime/context.cpp
+  ../runtime/device.cpp
+  ../runtime/event.cpp
+  ../runtime/memory.cpp
+  ../runtime/runtime.cpp
+  ../runtime/stream.cpp
 )
 
 target_include_directories(cudasim_core

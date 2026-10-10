@@ -27,6 +27,26 @@ cudasim_set_warnings(driver_api_smoke)
 cudasim_apply_sanitizers(driver_api_smoke)
 add_test(NAME compat.driver_api_smoke COMMAND driver_api_smoke)
 
+add_executable(runtime_stream_event_smoke
+  compat/runtime_stream_event_smoke.cpp
+)
+target_compile_features(runtime_stream_event_smoke PRIVATE cxx_std_20)
+target_include_directories(runtime_stream_event_smoke PRIVATE ${CMAKE_SOURCE_DIR}/src)
+target_link_libraries(runtime_stream_event_smoke PRIVATE cudart_shim)
+cudasim_set_warnings(runtime_stream_event_smoke)
+cudasim_apply_sanitizers(runtime_stream_event_smoke)
+add_test(NAME compat.runtime_stream_event_smoke COMMAND runtime_stream_event_smoke)
+
+add_executable(driver_stream_event_smoke
+  compat/driver_stream_event_smoke.cpp
+)
+target_compile_features(driver_stream_event_smoke PRIVATE cxx_std_20)
+target_include_directories(driver_stream_event_smoke PRIVATE ${CMAKE_SOURCE_DIR}/src)
+target_link_libraries(driver_stream_event_smoke PRIVATE cuda_shim)
+cudasim_set_warnings(driver_stream_event_smoke)
+cudasim_apply_sanitizers(driver_stream_event_smoke)
+add_test(NAME compat.driver_stream_event_smoke COMMAND driver_stream_event_smoke)
+
 add_test(
   NAME compat.exported_symbols
   COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/compat/check_symbols.sh

@@ -1,122 +1,61 @@
 #include "core/compat_state.h"
 
-#include <cstdlib>
+#include "runtime/memory.h"
+
 #include <cstring>
-#include <new>
-#include <utility>
 
 namespace cudasim::core {
-
-namespace {
-
-constexpr std::size_t kDeviceAlignment = 256;
-constexpr std::size_t kTotalMemory = std::size_t{8} * 1024 * 1024 * 1024;
-
-} // namespace
 
 CompatState &CompatState::instance() {
   static CompatState state;
   return state;
 }
 
-void CompatState::initialize() {
-  std::lock_guard<std::mutex> lock(mutex_);
-  if (initialized_) {
-    return;
-  }
+void CompatState::initialize() { (void)0; }
 
-  device_info_ = DeviceInfo{
-      "CUDA Simulator Device",
-      8,
-      0,
-      8,
-      1024,
-      2048,
-      32,
-      {2147483647, 65535, 65535},
-      {1024, 1024, 64},
-      49152,
-      65536,
-      1000000,
-      kTotalMemory,
-      1,
-  };
-  initialized_ = true;
-}
-
-bool CompatState::is_initialized() const {
-  std::lock_guard<std::mutex> lock(mutex_);
-  return initialized_;
-}
+bool CompatState::is_initialized() const { return true; }
 
 int CompatState::device_count() const {
-  std::lock_guard<std::mutex> lock(mutex_);
-  return initialized_ ? 1 : 0;
+  return cudasim::runtime::DeviceRegistry::instance().count();
 }
 
 const DeviceInfo &CompatState::device_info() const {
-  std::lock_guard<std::mutex> lock(mutex_);
-  return device_info_;
+  const auto &props =
+      cudasim::runtime::DeviceRegistry::instance().device(0).properties();
+  static DeviceInfo info;
+  std::strncpy(info.name, props.name, sizeof(info.name) - 1);
+  info.major = props.major;
+  info.minor = props.minor;
+  info.multi_processor_count = props.multi_processor_count;
+  info.max_threads_per_block = props.max_threads_per_block;
+  info.max_threads_per_multi_processor = props.max_threads_per_multi_processor;
+  info.warp_size = props.warp_size;
+  for (std::size_t i = 0; i < 3; ++i) {
+    info.max_grid_size[i] = props.max_grid_size[i];
+    info.max_threads_dim[i] = props.max_threads_dim[i];
+  }
+  info.shared_mem_per_block = props.shared_mem_per_block;
+  info.regs_per_block = props.regs_per_block;
+  info.clock_rate = props.clock_rate;
+  info.total_global_mem = props.total_global_mem;
+  info.integrated = props.integrated;
+  return info;
 }
 
 void *CompatState::device_alloc(std::size_t size) {
-  if (size == 0) {
-    return nullptr;
-  }
-
-  void *ptr = nullptr;
-  if (posix_memalign(&ptr, kDeviceAlignment, size) != 0) {
-    return nullptr;
-  }
-
-  std::lock_guard<std::mutex> lock(mutex_);
-  device_allocations_.emplace(ptr, size);
-  return ptr;
+  return cudasim::runtime::MemoryManager::instance().allocate_device(size);
 }
 
 void CompatState::device_free(void *ptr) {
-  if (ptr == nullptr) {
-    return;
-  }
-
-  {
-    std::lock_guard<std::mutex> lock(mutex_);
-    const auto it = device_allocations_.find(ptr);
-    if (it == device_allocations_.end()) {
-      return;
-    }
-    device_allocations_.erase(it);
-  }
-
-  std::free(ptr);
+  cudasim::runtime::MemoryManager::instance().free_device(ptr);
 }
 
 void *CompatState::host_alloc(std::size_t size) {
-  void *ptr = std::malloc(size);
-  if (ptr == nullptr) {
-    return nullptr;
-  }
-
-  std::lock_guard<std::mutex> lock(mutex_);
-  host_allocations_.emplace(ptr, size);
-  return ptr;
+  return cudasim::runtime::MemoryManager::instance().allocate_host(size);
 }
 
 void CompatState::host_free(void *ptr) {
-  if (ptr == nullptr) {
-    return;
-  }
-
-  {
-    std::lock_guard<std::mutex> lock(mutex_);
-    const auto it = host_allocations_.find(ptr);
-    if (it == host_allocations_.end()) {
-      return;
-    }
-    host_allocations_.erase(it);
-  }
-
-  std::free(ptr);
+  cudasim::runtime::MemoryManager::instance().free_host(ptr);
 }
 
 } // namespace cudasim::core

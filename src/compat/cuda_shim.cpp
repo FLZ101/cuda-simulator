@@ -1,10 +1,12 @@
 #include "compat/cuda_api.h"
 #include "compat/export.h"
 #include "core/compat_state.h"
+#include "runtime/runtime.h"
 
 #include <atomic>
 #include <cstddef>
 #include <cstring>
+#include <memory>
 
 namespace {
 
@@ -18,6 +20,27 @@ CUresult result(bool ok, CUresult failure) {
 }
 
 void *dummy_handle() { return reinterpret_cast<void *>(1); }
+
+std::shared_ptr<cudasim::runtime::Stream> get_stream(CUstream stream) {
+  const auto handle = reinterpret_cast<std::uintptr_t>(stream);
+  if (handle == 0) {
+    return {};
+  }
+  try {
+    return cudasim::runtime::StreamManager::instance().get(handle);
+  } catch (...) {
+    return {};
+  }
+}
+
+std::shared_ptr<cudasim::runtime::Event> get_event(CUevent event) {
+  const auto handle = reinterpret_cast<std::uintptr_t>(event);
+  try {
+    return cudasim::runtime::EventManager::instance().get(handle);
+  } catch (...) {
+    return {};
+  }
+}
 
 } // namespace
 
@@ -158,6 +181,7 @@ CUDASIM_EXTERN_C CUDASIM_API CUresult cuCtxGetDevice(CUdevice *device) {
 }
 
 CUDASIM_EXTERN_C CUDASIM_API CUresult cuCtxSynchronize() {
+  cudasim::runtime::StreamManager::instance().synchronize_all();
   return result(true, CUDA_SUCCESS);
 }
 
@@ -330,24 +354,37 @@ CUDASIM_EXTERN_C CUDASIM_API CUresult cuMemcpyHtoDAsync(CUdeviceptr dst,
                                                         const void *src,
                                                         std::size_t count,
                                                         CUstream stream) {
-  (void)stream;
-  return cuMemcpyHtoD(dst, src, count);
+  auto runtime_stream = get_stream(stream);
+  if (!runtime_stream) {
+    return cuMemcpyHtoD(dst, src, count);
+  }
+  runtime_stream->submit_copy(reinterpret_cast<void *>(dst), src, count);
+  return result(true, CUDA_SUCCESS);
 }
 
 CUDASIM_EXTERN_C CUDASIM_API CUresult cuMemcpyDtoHAsync(void *dst,
                                                         CUdeviceptr src,
                                                         std::size_t count,
                                                         CUstream stream) {
-  (void)stream;
-  return cuMemcpyDtoH(dst, src, count);
+  auto runtime_stream = get_stream(stream);
+  if (!runtime_stream) {
+    return cuMemcpyDtoH(dst, src, count);
+  }
+  runtime_stream->submit_copy(dst, reinterpret_cast<const void *>(src), count);
+  return result(true, CUDA_SUCCESS);
 }
 
 CUDASIM_EXTERN_C CUDASIM_API CUresult cuMemcpyDtoDAsync(CUdeviceptr dst,
                                                         CUdeviceptr src,
                                                         std::size_t count,
                                                         CUstream stream) {
-  (void)stream;
-  return cuMemcpyDtoD(dst, src, count);
+  auto runtime_stream = get_stream(stream);
+  if (!runtime_stream) {
+    return cuMemcpyDtoD(dst, src, count);
+  }
+  runtime_stream->submit_copy(reinterpret_cast<void *>(dst),
+                              reinterpret_cast<const void *>(src), count);
+  return result(true, CUDA_SUCCESS);
 }
 
 CUDASIM_EXTERN_C CUDASIM_API CUresult cuMemsetD8(CUdeviceptr dst,
@@ -375,7 +412,8 @@ CUDASIM_EXTERN_C CUDASIM_API CUresult cuStreamCreate(CUstream *stream,
   if (stream == nullptr) {
     return result(false, CUDA_ERROR_INVALID_VALUE);
   }
-  *stream = reinterpret_cast<void *>(g_handle_counter.fetch_add(1));
+  auto created = cudasim::runtime::StreamManager::instance().create();
+  *stream = reinterpret_cast<void *>(created->id());
   return result(true, CUDA_SUCCESS);
 }
 
@@ -396,26 +434,54 @@ CUDASIM_EXTERN_C CUDASIM_API CUresult cuStreamGetPriority(CUstream stream,
 }
 
 CUDASIM_EXTERN_C CUDASIM_API CUresult cuStreamDestroy(CUstream stream) {
-  (void)stream;
+  const auto handle = reinterpret_cast<std::uintptr_t>(stream);
+  if (handle != 0) {
+    cudasim::runtime::StreamManager::instance().destroy(handle);
+  }
   return result(true, CUDA_SUCCESS);
 }
 
 CUDASIM_EXTERN_C CUDASIM_API CUresult cuStreamSynchronize(CUstream stream) {
-  (void)stream;
+  if (stream == nullptr) {
+    cudasim::runtime::StreamManager::instance().synchronize_all();
+    return result(true, CUDA_SUCCESS);
+  }
+  auto runtime_stream = get_stream(stream);
+  if (!runtime_stream) {
+    return result(false, CUDA_ERROR_INVALID_CONTEXT);
+  }
+  runtime_stream->synchronize();
   return result(true, CUDA_SUCCESS);
 }
 
 CUDASIM_EXTERN_C CUDASIM_API CUresult cuStreamQuery(CUstream stream) {
-  (void)stream;
+  if (stream == nullptr) {
+    cudasim::runtime::StreamManager::instance().synchronize_all();
+    return result(true, CUDA_SUCCESS);
+  }
+  auto runtime_stream = get_stream(stream);
+  if (!runtime_stream) {
+    return result(false, CUDA_ERROR_INVALID_CONTEXT);
+  }
+  if (!runtime_stream->query()) {
+    return result(false, CUDA_ERROR_NOT_SUPPORTED);
+  }
   return result(true, CUDA_SUCCESS);
 }
 
 CUDASIM_EXTERN_C CUDASIM_API CUresult cuStreamWaitEvent(CUstream stream,
                                                         CUevent event,
                                                         unsigned int flags) {
-  (void)stream;
-  (void)event;
   (void)flags;
+  auto runtime_event = get_event(event);
+  if (!runtime_event) {
+    return result(false, CUDA_ERROR_INVALID_CONTEXT);
+  }
+  auto runtime_stream = get_stream(stream);
+  if (!runtime_stream) {
+    return result(false, CUDA_ERROR_INVALID_CONTEXT);
+  }
+  runtime_stream->submit_wait(runtime_event);
   return result(true, CUDA_SUCCESS);
 }
 
@@ -425,29 +491,49 @@ CUDASIM_EXTERN_C CUDASIM_API CUresult cuEventCreate(CUevent *event,
   if (event == nullptr) {
     return result(false, CUDA_ERROR_INVALID_VALUE);
   }
-  *event = reinterpret_cast<void *>(g_handle_counter.fetch_add(1));
+  auto created = cudasim::runtime::EventManager::instance().create();
+  *event = reinterpret_cast<void *>(created->id());
   return result(true, CUDA_SUCCESS);
 }
 
 CUDASIM_EXTERN_C CUDASIM_API CUresult cuEventDestroy(CUevent event) {
-  (void)event;
+  cudasim::runtime::EventManager::instance().destroy(
+      reinterpret_cast<std::uintptr_t>(event));
   return result(true, CUDA_SUCCESS);
 }
 
 CUDASIM_EXTERN_C CUDASIM_API CUresult cuEventRecord(CUevent event,
                                                     CUstream stream) {
-  (void)event;
-  (void)stream;
+  auto runtime_event = get_event(event);
+  if (!runtime_event) {
+    return result(false, CUDA_ERROR_INVALID_CONTEXT);
+  }
+  auto runtime_stream = get_stream(stream);
+  if (!runtime_stream) {
+    runtime_event->record();
+  } else {
+    runtime_stream->submit_event(runtime_event);
+  }
   return result(true, CUDA_SUCCESS);
 }
 
 CUDASIM_EXTERN_C CUDASIM_API CUresult cuEventSynchronize(CUevent event) {
-  (void)event;
+  auto runtime_event = get_event(event);
+  if (!runtime_event) {
+    return result(false, CUDA_ERROR_INVALID_CONTEXT);
+  }
+  runtime_event->wait();
   return result(true, CUDA_SUCCESS);
 }
 
 CUDASIM_EXTERN_C CUDASIM_API CUresult cuEventQuery(CUevent event) {
-  (void)event;
+  auto runtime_event = get_event(event);
+  if (!runtime_event) {
+    return result(false, CUDA_ERROR_INVALID_CONTEXT);
+  }
+  if (!runtime_event->is_recorded()) {
+    return result(false, CUDA_ERROR_NOT_SUPPORTED);
+  }
   return result(true, CUDA_SUCCESS);
 }
 

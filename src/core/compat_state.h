@@ -2,8 +2,8 @@
 
 #include <cstddef>
 #include <cstdint>
-#include <mutex>
-#include <unordered_map>
+
+#include "runtime/device.h"
 
 namespace cudasim::core {
 
@@ -40,12 +40,6 @@ public:
 
 private:
   CompatState() = default;
-
-  mutable std::mutex mutex_;
-  bool initialized_ = false;
-  DeviceInfo device_info_{};
-  std::unordered_map<void *, std::size_t> device_allocations_;
-  std::unordered_map<void *, std::size_t> host_allocations_;
 };
 
 } // namespace cudasim::core

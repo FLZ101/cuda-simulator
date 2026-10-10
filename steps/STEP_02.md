@@ -47,10 +47,37 @@ event waits.
 
 ## Work Log
 
+- Added a runtime layer with device, context, memory, stream, event, and runtime singleton classes.
+- files: `src/runtime/*.h`, `src/runtime/*.cpp`, `src/core/CMakeLists.txt`
+- verification: Core library built successfully.
+
+- Routed the compatibility state through the new runtime device and memory managers.
+- files: `src/core/compat_state.h`, `src/core/compat_state.cpp`
+- verification: Existing runtime and driver memory tests still passed.
+
+- Wired the runtime and driver shims to the new stream/event managers and made async copies queue through streams.
+- files: `src/compat/cudart_shim.cpp`, `src/compat/cuda_shim.cpp`
+- verification: New stream/event smoke tests passed.
+
+- Added runtime and driver asynchronous copy, stream, and event smoke tests.
+- files: `tests/compat/runtime_stream_event_smoke.cpp`, `tests/compat/driver_stream_event_smoke.cpp`, `tests/CMakeLists.txt`
+- verification: `make test` passed all 7 tests.
+
 ## Verification
 
-Not run yet.
+Commands run:
+
+```bash
+make format
+make test
+```
+
+Result:
+
+```text
+100% tests passed, 0 tests failed out of 7
+```
 
 ## Status
 
-in progress
+complete
