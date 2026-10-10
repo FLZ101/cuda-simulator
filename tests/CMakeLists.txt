@@ -125,6 +125,22 @@ cudasim_apply_sanitizers(multi_warp_barrier_exec_smoke)
 add_dependencies(multi_warp_barrier_exec_smoke generate_multi_warp_ptx)
 add_test(NAME ptx.multi_warp_barrier_exec_smoke COMMAND multi_warp_barrier_exec_smoke)
 
+add_test(
+  NAME ptx.simt_gate
+  COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/generated/check_simt.py
+          ${GENERATED_VECTOR_ADD_PTX}
+          ${GENERATED_SHARED_PTX}
+          ${GENERATED_MULTI_WARP_PTX}
+)
+
+add_test(
+  NAME ptx.coverage_report
+  COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/generated/run_coverage.py
+          ${GENERATED_VECTOR_ADD_PTX}
+          ${GENERATED_SHARED_PTX}
+          ${GENERATED_MULTI_WARP_PTX}
+)
+
 add_executable(runtime_api_smoke
   compat/runtime_api_smoke.cpp
 )
