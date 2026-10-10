@@ -2,6 +2,8 @@ add_library(cudart_shim SHARED
   cudart_shim.cpp
 )
 target_compile_features(cudart_shim PRIVATE cxx_std_20)
+target_include_directories(cudart_shim PRIVATE ${CMAKE_SOURCE_DIR}/src)
+target_link_libraries(cudart_shim PRIVATE cudasim_core)
 set_target_properties(cudart_shim PROPERTIES
   OUTPUT_NAME cudart_shim
   VERSION ${PROJECT_VERSION}
@@ -14,6 +16,8 @@ add_library(cuda_shim SHARED
   cuda_shim.cpp
 )
 target_compile_features(cuda_shim PRIVATE cxx_std_20)
+target_include_directories(cuda_shim PRIVATE ${CMAKE_SOURCE_DIR}/src)
+target_link_libraries(cuda_shim PRIVATE cudasim_core)
 set_target_properties(cuda_shim PROPERTIES
   OUTPUT_NAME cuda_shim
   VERSION ${PROJECT_VERSION}

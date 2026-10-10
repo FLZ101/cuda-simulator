@@ -42,10 +42,45 @@ device memory, and complete without loading a real CUDA driver.
 
 ## Work Log
 
+- Added common CUDA runtime/driver ABI types, error codes, and the shared-library export macro.
+- files: `src/compat/cuda_api.h`, `src/compat/error_codes.h`, `src/compat/export.h`
+- verification: `make test` compiled the headers successfully.
+
+- Added shared compatibility state for one simulated device and host-backed memory allocation.
+- files: `src/core/compat_state.h`, `src/core/compat_state.cpp`, `src/core/CMakeLists.txt`
+- verification: Runtime and driver memory tests passed.
+
+- Implemented the `libcudart_shim.so` runtime API surface and `nvcc` registration hook stubs.
+- files: `src/compat/cudart_shim.cpp`, `src/compat/CMakeLists.txt`
+- verification: `compat.runtime_api_smoke` and exported-symbol checks passed.
+
+- Implemented the `libcuda_shim.so` driver API surface.
+- files: `src/compat/cuda_shim.cpp`
+- verification: `compat.driver_api_smoke` and exported-symbol checks passed.
+
+- Added standalone runtime/driver smoke tests and an exported-symbol test.
+- files: `tests/compat/runtime_api_smoke.cpp`, `tests/compat/driver_api_smoke.cpp`, `tests/compat/check_symbols.sh`, `tests/CMakeLists.txt`
+- verification: `make format && make test` passed all 4 tests.
+
 ## Verification
 
-Not run yet.
+Commands run:
+
+```bash
+make format
+make test
+```
+
+Result:
+
+```text
+100% tests passed, 0 tests failed out of 4
+```
+
+`nvcc` is not installed in the current environment, so the generated-program
+check was replaced by standalone C++ smoke tests that link directly to the
+shim libraries.
 
 ## Status
 
-in progress
+complete

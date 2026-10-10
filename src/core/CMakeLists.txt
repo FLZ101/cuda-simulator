@@ -5,6 +5,7 @@ configure_file(
 )
 
 add_library(cudasim_core SHARED
+  compat_state.cpp
   version.cpp
 )
 

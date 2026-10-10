@@ -1,5 +1,509 @@
-namespace cudasim::compat {
+#include "compat/cuda_api.h"
+#include "compat/export.h"
+#include "core/compat_state.h"
 
-int cuda_shim_placeholder() { return 0; }
+#include <atomic>
+#include <cstddef>
+#include <cstring>
 
-} // namespace cudasim::compat
+namespace {
+
+thread_local CUresult g_last_result = CUDA_SUCCESS;
+std::atomic<std::uintptr_t> g_handle_counter{1};
+
+CUresult result(bool ok, CUresult failure) {
+  const CUresult code = ok ? CUDA_SUCCESS : failure;
+  g_last_result = code;
+  return code;
+}
+
+void *dummy_handle() { return reinterpret_cast<void *>(1); }
+
+} // namespace
+
+CUDASIM_EXTERN_C CUDASIM_API CUresult cuInit(unsigned int flags) {
+  (void)flags;
+  cudasim::core::CompatState::instance().initialize();
+  return result(true, CUDA_SUCCESS);
+}
+
+CUDASIM_EXTERN_C CUDASIM_API CUresult cuDeviceGetCount(int *count) {
+  if (count == nullptr) {
+    return result(false, CUDA_ERROR_INVALID_VALUE);
+  }
+  *count = cudasim::core::CompatState::instance().device_count();
+  return result(true, CUDA_SUCCESS);
+}
+
+CUDASIM_EXTERN_C CUDASIM_API CUresult cuDeviceGet(CUdevice *device,
+                                                  int ordinal) {
+  if (device == nullptr || ordinal != 0) {
+    return result(false, CUDA_ERROR_INVALID_DEVICE);
+  }
+  *device = 0;
+  return result(true, CUDA_SUCCESS);
+}
+
+CUDASIM_EXTERN_C CUDASIM_API CUresult cuDeviceGetName(char *name, int len,
+                                                      CUdevice device) {
+  if (name == nullptr || len <= 0 || device != 0) {
+    return result(false, CUDA_ERROR_INVALID_VALUE);
+  }
+  const auto &info = cudasim::core::CompatState::instance().device_info();
+  std::strncpy(name, info.name, static_cast<std::size_t>(len) - 1);
+  name[len - 1] = '\0';
+  return result(true, CUDA_SUCCESS);
+}
+
+CUDASIM_EXTERN_C CUDASIM_API CUresult
+cuDeviceGetAttribute(int *value, CUdevice_attribute attr, CUdevice device) {
+  if (value == nullptr || device != 0) {
+    return result(false, CUDA_ERROR_INVALID_VALUE);
+  }
+
+  const auto &info = cudasim::core::CompatState::instance().device_info();
+  switch (attr) {
+  case CU_DEVICE_ATTRIBUTE_MAX_THREADS_PER_BLOCK:
+    *value = info.max_threads_per_block;
+    break;
+  case CU_DEVICE_ATTRIBUTE_MAX_BLOCK_DIM_X:
+    *value = info.max_threads_dim[0];
+    break;
+  case CU_DEVICE_ATTRIBUTE_MAX_BLOCK_DIM_Y:
+    *value = info.max_threads_dim[1];
+    break;
+  case CU_DEVICE_ATTRIBUTE_MAX_BLOCK_DIM_Z:
+    *value = info.max_threads_dim[2];
+    break;
+  case CU_DEVICE_ATTRIBUTE_MAX_GRID_DIM_X:
+    *value = info.max_grid_size[0];
+    break;
+  case CU_DEVICE_ATTRIBUTE_MAX_GRID_DIM_Y:
+    *value = info.max_grid_size[1];
+    break;
+  case CU_DEVICE_ATTRIBUTE_MAX_GRID_DIM_Z:
+    *value = info.max_grid_size[2];
+    break;
+  case CU_DEVICE_ATTRIBUTE_MAX_SHARED_MEMORY_PER_BLOCK:
+    *value = info.shared_mem_per_block;
+    break;
+  case CU_DEVICE_ATTRIBUTE_WARP_SIZE:
+    *value = info.warp_size;
+    break;
+  case CU_DEVICE_ATTRIBUTE_MULTIPROCESSOR_COUNT:
+    *value = info.multi_processor_count;
+    break;
+  case CU_DEVICE_ATTRIBUTE_MAX_THREADS_PER_MULTIPROCESSOR:
+    *value = info.max_threads_per_multi_processor;
+    break;
+  case CU_DEVICE_ATTRIBUTE_COMPUTE_CAPABILITY_MAJOR:
+    *value = info.major;
+    break;
+  case CU_DEVICE_ATTRIBUTE_COMPUTE_CAPABILITY_MINOR:
+    *value = info.minor;
+    break;
+  default:
+    return result(false, CUDA_ERROR_INVALID_VALUE);
+  }
+
+  return result(true, CUDA_SUCCESS);
+}
+
+CUDASIM_EXTERN_C CUDASIM_API CUresult
+cuDevicePrimaryCtxRetain(CUcontext *ctx, CUdevice device) {
+  if (ctx == nullptr || device != 0) {
+    return result(false, CUDA_ERROR_INVALID_DEVICE);
+  }
+  *ctx = dummy_handle();
+  return result(true, CUDA_SUCCESS);
+}
+
+CUDASIM_EXTERN_C CUDASIM_API CUresult
+cuDevicePrimaryCtxRelease(CUdevice device) {
+  (void)device;
+  return result(true, CUDA_SUCCESS);
+}
+
+CUDASIM_EXTERN_C CUDASIM_API CUresult cuCtxCreate(CUcontext *ctx,
+                                                  unsigned int flags,
+                                                  CUdevice device) {
+  (void)flags;
+  return cuDevicePrimaryCtxRetain(ctx, device);
+}
+
+CUDASIM_EXTERN_C CUDASIM_API CUresult cuCtxDestroy(CUcontext ctx) {
+  (void)ctx;
+  return result(true, CUDA_SUCCESS);
+}
+
+CUDASIM_EXTERN_C CUDASIM_API CUresult cuCtxSetCurrent(CUcontext ctx) {
+  (void)ctx;
+  return result(true, CUDA_SUCCESS);
+}
+
+CUDASIM_EXTERN_C CUDASIM_API CUresult cuCtxGetCurrent(CUcontext *ctx) {
+  if (ctx == nullptr) {
+    return result(false, CUDA_ERROR_INVALID_VALUE);
+  }
+  *ctx = dummy_handle();
+  return result(true, CUDA_SUCCESS);
+}
+
+CUDASIM_EXTERN_C CUDASIM_API CUresult cuCtxGetDevice(CUdevice *device) {
+  if (device == nullptr) {
+    return result(false, CUDA_ERROR_INVALID_VALUE);
+  }
+  *device = 0;
+  return result(true, CUDA_SUCCESS);
+}
+
+CUDASIM_EXTERN_C CUDASIM_API CUresult cuCtxSynchronize() {
+  return result(true, CUDA_SUCCESS);
+}
+
+CUDASIM_EXTERN_C CUDASIM_API CUresult cuModuleLoad(CUmodule *module,
+                                                   const char *file) {
+  (void)module;
+  (void)file;
+  return result(false, CUDA_ERROR_NOT_SUPPORTED);
+}
+
+CUDASIM_EXTERN_C CUDASIM_API CUresult cuModuleLoadData(CUmodule *module,
+                                                       const void *image) {
+  (void)module;
+  (void)image;
+  return result(false, CUDA_ERROR_NOT_SUPPORTED);
+}
+
+CUDASIM_EXTERN_C CUDASIM_API CUresult cuModuleLoadDataEx(
+    CUmodule *module, const void *image, unsigned int num_options, int *options,
+    void **option_values) {
+  (void)module;
+  (void)image;
+  (void)num_options;
+  (void)options;
+  (void)option_values;
+  return result(false, CUDA_ERROR_NOT_SUPPORTED);
+}
+
+CUDASIM_EXTERN_C CUDASIM_API CUresult
+cuModuleLoadFatBinary(CUmodule *module, const void *fat_cubin) {
+  (void)module;
+  (void)fat_cubin;
+  return result(false, CUDA_ERROR_NOT_SUPPORTED);
+}
+
+CUDASIM_EXTERN_C CUDASIM_API CUresult cuModuleGetFunction(CUfunction *function,
+                                                          CUmodule module,
+                                                          const char *name) {
+  (void)function;
+  (void)module;
+  (void)name;
+  return result(false, CUDA_ERROR_NOT_SUPPORTED);
+}
+
+CUDASIM_EXTERN_C CUDASIM_API CUresult cuModuleUnload(CUmodule module) {
+  (void)module;
+  return result(true, CUDA_SUCCESS);
+}
+
+CUDASIM_EXTERN_C CUDASIM_API CUresult cuFuncGetAttribute(int *value, int attr,
+                                                         CUfunction function) {
+  (void)attr;
+  (void)function;
+  if (value == nullptr) {
+    return result(false, CUDA_ERROR_INVALID_VALUE);
+  }
+  *value = 0;
+  return result(true, CUDA_SUCCESS);
+}
+
+CUDASIM_EXTERN_C CUDASIM_API CUresult cuFuncSetAttribute(CUfunction function,
+                                                         int attr, int value) {
+  (void)function;
+  (void)attr;
+  (void)value;
+  return result(true, CUDA_SUCCESS);
+}
+
+CUDASIM_EXTERN_C CUDASIM_API CUresult
+cuOccupancyMaxActiveBlocksPerMultiprocessor(int *num_blocks,
+                                            CUfunction function, int block_size,
+                                            std::size_t dynamic_smem_size) {
+  (void)function;
+  (void)dynamic_smem_size;
+  if (num_blocks == nullptr || block_size <= 0) {
+    return result(false, CUDA_ERROR_INVALID_VALUE);
+  }
+  *num_blocks = 2048 / block_size;
+  return result(true, CUDA_SUCCESS);
+}
+
+CUDASIM_EXTERN_C CUDASIM_API CUresult cuMemAlloc(CUdeviceptr *ptr,
+                                                 std::size_t size) {
+  if (ptr == nullptr) {
+    return result(false, CUDA_ERROR_INVALID_VALUE);
+  }
+  *ptr = reinterpret_cast<CUdeviceptr>(
+      cudasim::core::CompatState::instance().device_alloc(size));
+  return result(*ptr != 0 || size == 0, CUDA_ERROR_OUT_OF_MEMORY);
+}
+
+CUDASIM_EXTERN_C CUDASIM_API CUresult cuMemFree(CUdeviceptr ptr) {
+  cudasim::core::CompatState::instance().device_free(
+      reinterpret_cast<void *>(ptr));
+  return result(true, CUDA_SUCCESS);
+}
+
+CUDASIM_EXTERN_C CUDASIM_API CUresult cuMemAllocManaged(CUdeviceptr *ptr,
+                                                        std::size_t size,
+                                                        unsigned int flags) {
+  (void)flags;
+  return cuMemAlloc(ptr, size);
+}
+
+CUDASIM_EXTERN_C CUDASIM_API CUresult cuMemHostAlloc(void **ptr,
+                                                     std::size_t size,
+                                                     unsigned int flags) {
+  (void)flags;
+  if (ptr == nullptr) {
+    return result(false, CUDA_ERROR_INVALID_VALUE);
+  }
+  *ptr = cudasim::core::CompatState::instance().host_alloc(size);
+  return result(*ptr != nullptr || size == 0, CUDA_ERROR_OUT_OF_MEMORY);
+}
+
+CUDASIM_EXTERN_C CUDASIM_API CUresult cuMemFreeHost(void *ptr) {
+  cudasim::core::CompatState::instance().host_free(ptr);
+  return result(true, CUDA_SUCCESS);
+}
+
+CUDASIM_EXTERN_C CUDASIM_API CUresult cuMemGetInfo(std::size_t *free,
+                                                   std::size_t *total) {
+  const auto &info = cudasim::core::CompatState::instance().device_info();
+  if (free != nullptr) {
+    *free = info.total_global_mem;
+  }
+  if (total != nullptr) {
+    *total = info.total_global_mem;
+  }
+  return result(true, CUDA_SUCCESS);
+}
+
+CUDASIM_EXTERN_C CUDASIM_API CUresult cuPointerGetAttribute(void *data,
+                                                            int attribute,
+                                                            CUdeviceptr ptr) {
+  (void)data;
+  (void)attribute;
+  (void)ptr;
+  return result(false, CUDA_ERROR_NOT_SUPPORTED);
+}
+
+CUDASIM_EXTERN_C CUDASIM_API CUresult cuMemcpyHtoD(CUdeviceptr dst,
+                                                   const void *src,
+                                                   std::size_t count) {
+  if (src == nullptr && count != 0) {
+    return result(false, CUDA_ERROR_INVALID_VALUE);
+  }
+  std::memcpy(reinterpret_cast<void *>(dst), src, count);
+  return result(true, CUDA_SUCCESS);
+}
+
+CUDASIM_EXTERN_C CUDASIM_API CUresult cuMemcpyDtoH(void *dst, CUdeviceptr src,
+                                                   std::size_t count) {
+  if (dst == nullptr && count != 0) {
+    return result(false, CUDA_ERROR_INVALID_VALUE);
+  }
+  std::memcpy(dst, reinterpret_cast<const void *>(src), count);
+  return result(true, CUDA_SUCCESS);
+}
+
+CUDASIM_EXTERN_C CUDASIM_API CUresult cuMemcpyDtoD(CUdeviceptr dst,
+                                                   CUdeviceptr src,
+                                                   std::size_t count) {
+  std::memcpy(reinterpret_cast<void *>(dst),
+              reinterpret_cast<const void *>(src), count);
+  return result(true, CUDA_SUCCESS);
+}
+
+CUDASIM_EXTERN_C CUDASIM_API CUresult cuMemcpyHtoDAsync(CUdeviceptr dst,
+                                                        const void *src,
+                                                        std::size_t count,
+                                                        CUstream stream) {
+  (void)stream;
+  return cuMemcpyHtoD(dst, src, count);
+}
+
+CUDASIM_EXTERN_C CUDASIM_API CUresult cuMemcpyDtoHAsync(void *dst,
+                                                        CUdeviceptr src,
+                                                        std::size_t count,
+                                                        CUstream stream) {
+  (void)stream;
+  return cuMemcpyDtoH(dst, src, count);
+}
+
+CUDASIM_EXTERN_C CUDASIM_API CUresult cuMemcpyDtoDAsync(CUdeviceptr dst,
+                                                        CUdeviceptr src,
+                                                        std::size_t count,
+                                                        CUstream stream) {
+  (void)stream;
+  return cuMemcpyDtoD(dst, src, count);
+}
+
+CUDASIM_EXTERN_C CUDASIM_API CUresult cuMemsetD8(CUdeviceptr dst,
+                                                 unsigned char value,
+                                                 std::size_t count) {
+  std::memset(reinterpret_cast<void *>(dst), value, count);
+  return result(true, CUDA_SUCCESS);
+}
+
+CUDASIM_EXTERN_C CUDASIM_API CUresult cuMemsetD32(CUdeviceptr dst,
+                                                  unsigned int value,
+                                                  std::size_t count) {
+  const std::size_t bytes = count * sizeof(unsigned int);
+  std::memset(reinterpret_cast<void *>(dst), 0, bytes);
+  auto *out = reinterpret_cast<unsigned int *>(dst);
+  for (std::size_t i = 0; i < count; ++i) {
+    out[i] = value;
+  }
+  return result(true, CUDA_SUCCESS);
+}
+
+CUDASIM_EXTERN_C CUDASIM_API CUresult cuStreamCreate(CUstream *stream,
+                                                     unsigned int flags) {
+  (void)flags;
+  if (stream == nullptr) {
+    return result(false, CUDA_ERROR_INVALID_VALUE);
+  }
+  *stream = reinterpret_cast<void *>(g_handle_counter.fetch_add(1));
+  return result(true, CUDA_SUCCESS);
+}
+
+CUDASIM_EXTERN_C CUDASIM_API CUresult
+cuStreamCreateWithPriority(CUstream *stream, unsigned int flags, int priority) {
+  (void)priority;
+  return cuStreamCreate(stream, flags);
+}
+
+CUDASIM_EXTERN_C CUDASIM_API CUresult cuStreamGetPriority(CUstream stream,
+                                                          int *priority) {
+  (void)stream;
+  if (priority == nullptr) {
+    return result(false, CUDA_ERROR_INVALID_VALUE);
+  }
+  *priority = 0;
+  return result(true, CUDA_SUCCESS);
+}
+
+CUDASIM_EXTERN_C CUDASIM_API CUresult cuStreamDestroy(CUstream stream) {
+  (void)stream;
+  return result(true, CUDA_SUCCESS);
+}
+
+CUDASIM_EXTERN_C CUDASIM_API CUresult cuStreamSynchronize(CUstream stream) {
+  (void)stream;
+  return result(true, CUDA_SUCCESS);
+}
+
+CUDASIM_EXTERN_C CUDASIM_API CUresult cuStreamQuery(CUstream stream) {
+  (void)stream;
+  return result(true, CUDA_SUCCESS);
+}
+
+CUDASIM_EXTERN_C CUDASIM_API CUresult cuStreamWaitEvent(CUstream stream,
+                                                        CUevent event,
+                                                        unsigned int flags) {
+  (void)stream;
+  (void)event;
+  (void)flags;
+  return result(true, CUDA_SUCCESS);
+}
+
+CUDASIM_EXTERN_C CUDASIM_API CUresult cuEventCreate(CUevent *event,
+                                                    unsigned int flags) {
+  (void)flags;
+  if (event == nullptr) {
+    return result(false, CUDA_ERROR_INVALID_VALUE);
+  }
+  *event = reinterpret_cast<void *>(g_handle_counter.fetch_add(1));
+  return result(true, CUDA_SUCCESS);
+}
+
+CUDASIM_EXTERN_C CUDASIM_API CUresult cuEventDestroy(CUevent event) {
+  (void)event;
+  return result(true, CUDA_SUCCESS);
+}
+
+CUDASIM_EXTERN_C CUDASIM_API CUresult cuEventRecord(CUevent event,
+                                                    CUstream stream) {
+  (void)event;
+  (void)stream;
+  return result(true, CUDA_SUCCESS);
+}
+
+CUDASIM_EXTERN_C CUDASIM_API CUresult cuEventSynchronize(CUevent event) {
+  (void)event;
+  return result(true, CUDA_SUCCESS);
+}
+
+CUDASIM_EXTERN_C CUDASIM_API CUresult cuEventQuery(CUevent event) {
+  (void)event;
+  return result(true, CUDA_SUCCESS);
+}
+
+CUDASIM_EXTERN_C CUDASIM_API CUresult cuEventElapsedTime(float *ms,
+                                                         CUevent start,
+                                                         CUevent end) {
+  (void)start;
+  (void)end;
+  if (ms == nullptr) {
+    return result(false, CUDA_ERROR_INVALID_VALUE);
+  }
+  *ms = 0.0F;
+  return result(true, CUDA_SUCCESS);
+}
+
+CUDASIM_EXTERN_C CUDASIM_API CUresult
+cuLaunchKernel(CUfunction function, unsigned int grid_x, unsigned int grid_y,
+               unsigned int grid_z, unsigned int block_x, unsigned int block_y,
+               unsigned int block_z, unsigned int shared_mem, CUstream stream,
+               void **params, void **extra) {
+  (void)function;
+  (void)grid_x;
+  (void)grid_y;
+  (void)grid_z;
+  (void)block_x;
+  (void)block_y;
+  (void)block_z;
+  (void)shared_mem;
+  (void)stream;
+  (void)params;
+  (void)extra;
+  return result(false, CUDA_ERROR_NOT_SUPPORTED);
+}
+
+CUDASIM_EXTERN_C CUDASIM_API const char *cuGetErrorName(CUresult code) {
+  (void)code;
+  return "CUDA_ERROR";
+}
+
+CUDASIM_EXTERN_C CUDASIM_API const char *cuGetErrorString(CUresult code) {
+  switch (code) {
+  case CUDA_SUCCESS:
+    return "no error";
+  case CUDA_ERROR_INVALID_VALUE:
+    return "invalid argument";
+  case CUDA_ERROR_OUT_OF_MEMORY:
+    return "out of memory";
+  case CUDA_ERROR_NOT_INITIALIZED:
+    return "not initialized";
+  case CUDA_ERROR_INVALID_DEVICE:
+    return "invalid device";
+  case CUDA_ERROR_INVALID_CONTEXT:
+    return "invalid context";
+  case CUDA_ERROR_NOT_SUPPORTED:
+    return "operation not supported";
+  default:
+    return "unknown error";
+  }
+}
