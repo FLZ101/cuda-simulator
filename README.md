@@ -7,6 +7,12 @@ targets are ResNet-18/ResNet-50 and GPT-2 124M.
 
 See [DESIGN.md](DESIGN.md) for the full design.
 
+Additional documentation:
+
+- [CUDA_PROGRAMMING_MODEL.md](CUDA_PROGRAMMING_MODEL.md)
+- [GPU_MODEL.md](GPU_MODEL.md)
+- [CUDA_BEST_PRACTICES.md](CUDA_BEST_PRACTICES.md)
+
 ## Requirements
 
 - CMake 3.24 or newer
