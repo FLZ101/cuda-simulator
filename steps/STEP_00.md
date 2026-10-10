@@ -70,6 +70,14 @@ The build must succeed with no simulator-specific CUDA functionality.
 - files: `steps/STEP_00.md`
 - verification: No build or test required.
 
+- Switched the build driver from Make to Ninja and added a top-level Makefile with `build`, `test`, `run`, `clean`, and `help` targets.
+- files: `Makefile`, `README.md`, `AGENTS.md`
+- verification: `make clean && make test` passed with Ninja and all tests passed.
+
+- Added LLVM-style `clang-format` configuration, a Git pre-commit hook, a `pre-commit` configuration, and Makefile targets for hook installation and formatting.
+- files: `.clang-format`, `.githooks/pre-commit`, `.pre-commit-config.yaml`, `Makefile`, `README.md`, `AGENTS.md`
+- verification: `make test` passed; `clang-format --dry-run --Werror` passed on all C++ sources.
+
 ## Verification
 
 Commands run:

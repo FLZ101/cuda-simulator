@@ -6,4 +6,4 @@ namespace cudasim {
 
 std::string version_string();
 
-}  // namespace cudasim
+} // namespace cudasim

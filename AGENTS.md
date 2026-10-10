@@ -90,6 +90,8 @@ related work. Do not leave it as an untracked local note.
 - C++20.
 - Internal code lives in namespace `cudasim`.
 - Only `compat` shim libraries export CUDA ABI symbols.
+- C++ code must be formatted with `clang-format` using the LLVM style.
+- Install the Git pre-commit hook with `make install-hooks`.
 - Use `apply_patch` for file edits.
 - Keep generated artifacts and fixtures under `tests/`.
 
@@ -122,9 +124,7 @@ Always run the smallest relevant test after a change.
 For the current design phase:
 
 ```bash
-cmake -S . -B build
-cmake --build build -j
-ctest --test-dir build --output-on-failure
+make test
 ```
 
 For generated programs:

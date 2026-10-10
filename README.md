@@ -10,14 +10,38 @@ See [DESIGN.md](DESIGN.md) for the full design.
 ## Build
 
 ```bash
-cmake -S . -B build
-cmake --build build -j
-ctest --test-dir build --output-on-failure
+make build
+make test
 ```
 
 ## Options
 
+The Makefile drives CMake with Ninja by default.
+
 ```text
-CUDA_SIM_ENABLE_JIT=OFF|ON
-CUDA_SIM_ENABLE_SANITIZERS=OFF|ON
+make build      configure and build
+make test       build and run tests
+make run        build and run the CLI
+make install-hooks  configure Git pre-commit hooks
+make format     format C++ sources with clang-format
+make clean      remove the build directory
+```
+
+Install the Git pre-commit hook:
+
+```bash
+make install-hooks
+```
+
+The hook runs `clang-format` on staged C/C++ files using the LLVM style.
+
+Direct CMake configuration is still available:
+
+```bash
+cmake -S . -B build -G Ninja \
+  -DCMAKE_BUILD_TYPE=Debug \
+  -DCUDA_SIM_ENABLE_JIT=OFF \
+  -DCUDA_SIM_ENABLE_SANITIZERS=OFF
+cmake --build build
+ctest --test-dir build --output-on-failure
 ```

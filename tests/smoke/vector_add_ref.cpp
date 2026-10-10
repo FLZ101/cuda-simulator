@@ -1,9 +1,8 @@
 #include <cstddef>
 #include <vector>
 
-static std::vector<float> add_vectors(
-    const std::vector<float>& a,
-    const std::vector<float>& b) {
+static std::vector<float> add_vectors(const std::vector<float> &a,
+                                      const std::vector<float> &b) {
   std::vector<float> c(a.size());
   for (std::size_t i = 0; i < a.size(); ++i) {
     c[i] = a[i] + b[i];
