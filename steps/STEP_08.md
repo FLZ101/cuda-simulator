@@ -76,6 +76,12 @@ Result:
 100% tests passed, 0 tests failed out of 19
 ```
 
+Required before Step 9:
+
+- Every generated operator kernel must have an execution test and a CPU
+  reference comparison before ResNet integration starts.
+- PTX generation and SIMT-gate checks are not enough for operator correctness.
+
 ## Status
 
 complete

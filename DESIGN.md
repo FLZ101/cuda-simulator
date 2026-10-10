@@ -898,6 +898,86 @@ FP16/BF16: rtol = 5e-2, atol = 1e-2
 integer: exact
 ```
 
+### Step 8.5: Operator Execution Qualification Gate
+
+Before ResNet or GPT-2 integration, every generated operator kernel must be
+executed through the simulator and compared with a CPU reference. PTX
+generation and SIMT-gate checks are not sufficient.
+
+Qualification target matrix:
+
+| Operator | Shape family | Reference | Output |
+| --- | --- | --- | --- |
+| elementwise add/mul/relu | `N` or `B,C,H,W` | CPU reference | tensor |
+| saxpy | `N` | CPU reference | tensor |
+| copy | `N` | CPU reference | tensor |
+| reduction | `N -> 1` | CPU reference | scalar |
+| transpose | `H,W -> W,H` | CPU reference | tensor |
+| naive matmul | `MxNxK` | CPU reference | tensor |
+| tiled matmul | `MxNxK` | CPU reference | tensor |
+| softmax | `B,S,D` per row | CPU reference | tensor |
+| layer norm | `B,S,D` per row | CPU reference | tensor |
+| attention scores | `B,H,S,D` | CPU reference | tensor |
+| embedding lookup | `tokens,D` | CPU reference | tensor |
+| Conv2d naive | `1,C,H,W` | CPU reference | tensor |
+| Conv2d im2col | `1,C,H,W` | CPU reference | tensor |
+| Conv2d shared | `1,C,H,W` | CPU reference | tensor |
+| max/avg pool | `1,C,H,W` | CPU reference | tensor |
+| bias add | `B,C,H,W` | CPU reference | tensor |
+| batch norm | `B,C,H,W` | CPU reference | tensor |
+| GELU | `N` | CPU reference | tensor |
+
+For each operator:
+
+1. Create a fixture directory:
+
+   ```text
+   tests/differential/fixtures/<operator>/
+     host_runner
+     input.raw
+     reference.raw
+     manifest.json
+   ```
+
+2. Create or extend a host runner that:
+
+   - reads deterministic input files
+   - loads the generated PTX through `cuModuleLoadData`
+   - launches the kernel through `cuLaunchKernel`
+   - writes output files
+
+3. Add a Python reference function.
+
+4. Run:
+
+   ```bash
+   LD_PRELOAD=<libcudart_shim>:<libcuda_shim> ./host_runner
+   ```
+
+5. Compare:
+
+   ```bash
+   python3 tests/differential/run_all.py \
+     --fixture <operator> \
+     --runner ./host_runner
+   ```
+
+6. If the executor reports an unsupported PTX instruction:
+
+   - add the minimal opcode/type support
+   - add a focused regression test
+   - rerun the operator
+
+Exit criteria:
+
+```text
+every operator in the target matrix has a passing differential test
+no unsupported PTX instruction remains for those operators
+all operator PTX passes the SIMT gate
+```
+
+Only after this gate passes may work proceed to Step 9.
+
 ### Step 9: ResNet End-to-End
 
 Generate a standalone `resnet50_runner` host executable.
