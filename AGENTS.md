@@ -40,6 +40,8 @@ adding a plan.
 - `DESIGN.md` exists and is the source of truth.
 - No implementation code exists yet.
 - The implementation order is defined in `DESIGN.md`, Section 11.
+- CUDA toolkit or an external generator is required to create CUDA test
+  programs. A GPU is not required to generate PTX.
 
 ## Workflow
 

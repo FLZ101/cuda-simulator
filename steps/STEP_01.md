@@ -66,6 +66,10 @@ device memory, and complete without loading a real CUDA driver.
 - files: `CMakeLists.txt`, `tests/compat/nvcc_smoke.cu`, `tests/compat/run_nvcc_smoke.sh`, `tests/CMakeLists.txt`
 - verification: `make test` passed all 5 tests.
 
+- Made CUDA toolkit discovery required in CMake and made the `nvcc_smoke` test unconditional.
+- files: `CMakeLists.txt`, `tests/CMakeLists.txt`, `README.md`
+- verification: `make test` passed all 5 tests.
+
 ## Verification
 
 Commands run:

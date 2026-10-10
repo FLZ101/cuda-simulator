@@ -7,6 +7,15 @@ targets are ResNet-18/ResNet-50 and GPT-2 124M.
 
 See [DESIGN.md](DESIGN.md) for the full design.
 
+## Requirements
+
+- CMake 3.24 or newer
+- Ninja
+- C++20 compiler
+- CUDA toolkit with `nvcc`
+- clang-format
+- optional LLVM development package when `CUDA_SIM_ENABLE_JIT=ON`
+
 ## Build
 
 ```bash

@@ -41,6 +41,10 @@ Host assumptions:
 - C++20.
 - PTX ISA 7.x and 8.x.
 - Generated targets: `sm_70`, `sm_75`, `sm_80`, or `sm_86`, with PTX embedded.
+- CUDA toolkit or another external generator is required to produce the CUDA
+  programs under test. It is a generation dependency, not a simulator runtime
+  dependency.
+- A GPU is not required for generation; `nvcc` can emit PTX without a GPU.
 
 ## 3. How a Program Runs
 
