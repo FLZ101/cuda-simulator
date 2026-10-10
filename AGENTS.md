@@ -69,14 +69,14 @@ Before starting a step:
 
 While working:
 
-- Keep a `Commits` section in the step markdown.
-- After every commit, add one entry with:
+- Record what was done under the step's `## Work Log` section.
+- Do not record commit hashes or commit subjects.
+- Give each completed piece of work its own short entry:
 
   ```text
-  - hash: <short or full hash>
-  - subject: <commit message>
+  - <what was implemented or changed>
   - files: <affected files>
-  - notes: <what changed and why>
+  - verification: <what was checked after this commit>
   ```
 
 - Update the `Status` and `Verification` sections after important milestones.

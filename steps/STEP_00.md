@@ -38,15 +38,13 @@ ctest --test-dir build --output-on-failure
 
 The build must succeed with no simulator-specific CUDA functionality.
 
-## Commits
+## Work Log
 
-- hash: `1b28c42`
-- subject: `Add step recording workflow and step 0 plan`
+- Added the agent workflow and the step recording guide.
 - files: `AGENTS.md`, `steps/STEP_00.md`
-- notes: Added the agent workflow, step recording rules, and the initial Step 0 plan.
+- verification: No build or test required.
 
-- hash: `82122d4`
-- subject: `Create step 0 build and test skeleton`
+- Created the C++20 CMake project, core library, two shim libraries, CLI runner, generated version header, and vector-add smoke test.
 - files:
   - `.gitignore`
   - `CMakeLists.txt`
@@ -66,7 +64,11 @@ The build must succeed with no simulator-specific CUDA functionality.
   - `src/core/version.h.in`
   - `tests/CMakeLists.txt`
   - `tests/smoke/vector_add_ref.cpp`
-- notes: Created C++20 CMake targets for the core library, two shim libraries, CLI runner, and smoke test. The smoke test and CLI runner build and run.
+- verification: Build and CTest passed; the CLI printed `cuda-simulator 0.1.0 jit=off`.
+
+- Recorded the Step 0 verification result and marked the step complete.
+- files: `steps/STEP_00.md`
+- verification: No build or test required.
 
 ## Verification
 
