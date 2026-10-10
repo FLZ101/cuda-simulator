@@ -886,8 +886,9 @@ tests/fixtures/<operator>/
 Harness behavior:
 
 1. Run generated host program under `LD_PRELOAD`.
-2. Produce the golden output on the real GPU, or with a PyTorch CPU reference
-   when the host runner is generated from a PyTorch model.
+2. Produce the golden output:
+   - on the real GPU for `nvcc`-compiled CUDA programs
+   - with PyTorch CPU inference for PyTorch-generated model runners
 3. Compare tensors.
 4. Report max absolute/relative error.
 
@@ -902,8 +903,8 @@ integer: exact
 ### Step 8.5: Operator Execution Qualification Gate
 
 Before ResNet or GPT-2 integration, every generated operator kernel must be
-executed through the simulator and compared with a real GPU reference or a
-PyTorch CPU reference. PTX generation and SIMT-gate checks are not sufficient.
+executed through the simulator and compared with the correct reference for its
+producer. PTX generation and SIMT-gate checks are not sufficient.
 
 When a CUDA-capable GPU is available, use it as the primary golden oracle:
 
@@ -912,31 +913,37 @@ When a CUDA-capable GPU is available, use it as the primary golden oracle:
 3. Run the same host runner with `LD_PRELOAD` simulator shims.
 4. Compare simulator output with the GPU golden output.
 
-The real GPU is required for this project, and PyTorch CPU reference output is
-also accepted when the generated host runner is produced from a PyTorch model.
+Reference selection:
+
+```text
+nvcc-compiled CUDA program -> real GPU reference
+PyTorch-generated model runner -> PyTorch CPU reference
+```
+
+The real GPU is still required for this project.
 
 Qualification target matrix:
 
 | Operator | Shape family | Reference | Output |
 | --- | --- | --- | --- |
-| elementwise add/mul/relu | `N` or `B,C,H,W` | GPU or PyTorch CPU reference | tensor |
-| saxpy | `N` | GPU or PyTorch CPU reference | tensor |
-| copy | `N` | GPU or PyTorch CPU reference | tensor |
-| reduction | `N -> 1` | GPU or PyTorch CPU reference | scalar |
-| transpose | `H,W -> W,H` | GPU or PyTorch CPU reference | tensor |
-| naive matmul | `MxNxK` | GPU or PyTorch CPU reference | tensor |
-| tiled matmul | `MxNxK` | GPU or PyTorch CPU reference | tensor |
-| softmax | `B,S,D` per row | GPU or PyTorch CPU reference | tensor |
-| layer norm | `B,S,D` per row | GPU or PyTorch CPU reference | tensor |
-| attention scores | `B,H,S,D` | GPU or PyTorch CPU reference | tensor |
-| embedding lookup | `tokens,D` | GPU or PyTorch CPU reference | tensor |
-| Conv2d naive | `1,C,H,W` | GPU or PyTorch CPU reference | tensor |
-| Conv2d im2col | `1,C,H,W` | GPU or PyTorch CPU reference | tensor |
-| Conv2d shared | `1,C,H,W` | GPU or PyTorch CPU reference | tensor |
-| max/avg pool | `1,C,H,W` | GPU or PyTorch CPU reference | tensor |
-| bias add | `B,C,H,W` | GPU or PyTorch CPU reference | tensor |
-| batch norm | `B,C,H,W` | GPU or PyTorch CPU reference | tensor |
-| GELU | `N` | GPU or PyTorch CPU reference | tensor |
+| elementwise add/mul/relu | `N` or `B,C,H,W` | GPU for nvcc / PyTorch CPU for model | tensor |
+| saxpy | `N` | GPU for nvcc / PyTorch CPU for model | tensor |
+| copy | `N` | GPU for nvcc / PyTorch CPU for model | tensor |
+| reduction | `N -> 1` | GPU for nvcc / PyTorch CPU for model | scalar |
+| transpose | `H,W -> W,H` | GPU for nvcc / PyTorch CPU for model | tensor |
+| naive matmul | `MxNxK` | GPU for nvcc / PyTorch CPU for model | tensor |
+| tiled matmul | `MxNxK` | GPU for nvcc / PyTorch CPU for model | tensor |
+| softmax | `B,S,D` per row | GPU for nvcc / PyTorch CPU for model | tensor |
+| layer norm | `B,S,D` per row | GPU for nvcc / PyTorch CPU for model | tensor |
+| attention scores | `B,H,S,D` | GPU for nvcc / PyTorch CPU for model | tensor |
+| embedding lookup | `tokens,D` | GPU for nvcc / PyTorch CPU for model | tensor |
+| Conv2d naive | `1,C,H,W` | GPU for nvcc / PyTorch CPU for model | tensor |
+| Conv2d im2col | `1,C,H,W` | GPU for nvcc / PyTorch CPU for model | tensor |
+| Conv2d shared | `1,C,H,W` | GPU for nvcc / PyTorch CPU for model | tensor |
+| max/avg pool | `1,C,H,W` | GPU for nvcc / PyTorch CPU for model | tensor |
+| bias add | `B,C,H,W` | GPU for nvcc / PyTorch CPU for model | tensor |
+| batch norm | `B,C,H,W` | GPU for nvcc / PyTorch CPU for model | tensor |
+| GELU | `N` | GPU for nvcc / PyTorch CPU for model | tensor |
 
 For each operator:
 
@@ -1157,7 +1164,7 @@ model end-to-end tests passing
 Bottom-up:
 
 1. Component tests for shims, memory, streams, events, and PTX parsing.
-2. Kernel differential tests against real GPU or PyTorch CPU golden output.
+2. Kernel differential tests against the producer-appropriate golden output.
 3. Operator tests for Conv2d, GEMM, elementwise, reduction, softmax, layer
    norm, and attention.
 4. End-to-end ResNet and GPT-2 tests.
