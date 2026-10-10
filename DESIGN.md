@@ -913,6 +913,23 @@ When a CUDA-capable GPU is available, use it as the primary golden oracle:
 3. Run the same host runner with `LD_PRELOAD` simulator shims.
 4. Compare simulator output with the GPU golden output.
 
+The preferred GPU reference structure is one `nvcc`-compiled host runner that:
+
+- contains all generated operator kernels in one translation unit
+- dispatches by kernel name from the command line
+- takes the same input/output files as the simulator runner
+
+Example:
+
+```bash
+gpu_reference_runner --kernel matmul_naive \
+  --input-a a.bin --input-b b.bin --output gpu_out.bin \
+  --m 8 --n 8 --k 8
+```
+
+This keeps GPU and simulator invocation symmetric and avoids maintaining one
+separate runner per operator.
+
 Reference selection:
 
 ```text
