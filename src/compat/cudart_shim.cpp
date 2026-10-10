@@ -1,6 +1,7 @@
 #include "compat/cuda_api.h"
 #include "compat/export.h"
 #include "core/compat_state.h"
+#include "loader/module_registry.h"
 #include "runtime/runtime.h"
 
 #include <atomic>
@@ -557,9 +558,11 @@ CUDASIM_EXTERN_C CUDASIM_API const char *cudaGetErrorString(cudaError_t error) {
 }
 
 CUDASIM_EXTERN_C CUDASIM_API void **__cudaRegisterFatBinary(void *fat_cubin) {
-  static void *handle = nullptr;
-  handle = fat_cubin;
-  return &handle;
+  (void)fat_cubin;
+  static std::uint64_t handle = 0;
+  cudasim::ptx::Module empty;
+  handle = cudasim::loader::ModuleRegistry::instance().register_module(empty);
+  return reinterpret_cast<void **>(&handle);
 }
 
 CUDASIM_EXTERN_C CUDASIM_API void
@@ -567,9 +570,6 @@ __cudaRegisterFunction(void **fat_cubin_handle, const char *host_func,
                        char *device_func, const char *device_name,
                        int thread_limit, int *tid, int *bid, int *block_dim,
                        int *grid_dim, int *warp_size) {
-  (void)fat_cubin_handle;
-  (void)host_func;
-  (void)device_func;
   (void)device_name;
   (void)thread_limit;
   (void)tid;
@@ -577,6 +577,16 @@ __cudaRegisterFunction(void **fat_cubin_handle, const char *host_func,
   (void)block_dim;
   (void)grid_dim;
   (void)warp_size;
+
+  if (fat_cubin_handle == nullptr || host_func == nullptr ||
+      device_func == nullptr) {
+    return;
+  }
+
+  const std::uint64_t handle =
+      *reinterpret_cast<std::uint64_t *>(fat_cubin_handle);
+  cudasim::loader::ModuleRegistry::instance().register_runtime_function(
+      handle, host_func, device_func);
 }
 
 CUDASIM_EXTERN_C CUDASIM_API void

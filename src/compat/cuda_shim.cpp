@@ -1,6 +1,9 @@
 #include "compat/cuda_api.h"
 #include "compat/export.h"
 #include "core/compat_state.h"
+#include "loader/fatbin.h"
+#include "loader/module_registry.h"
+#include "ptx/module.h"
 #include "runtime/runtime.h"
 
 #include <atomic>
@@ -187,43 +190,63 @@ CUDASIM_EXTERN_C CUDASIM_API CUresult cuCtxSynchronize() {
 
 CUDASIM_EXTERN_C CUDASIM_API CUresult cuModuleLoad(CUmodule *module,
                                                    const char *file) {
-  (void)module;
+  if (module == nullptr || file == nullptr) {
+    return result(false, CUDA_ERROR_INVALID_VALUE);
+  }
   (void)file;
   return result(false, CUDA_ERROR_NOT_SUPPORTED);
 }
 
 CUDASIM_EXTERN_C CUDASIM_API CUresult cuModuleLoadData(CUmodule *module,
                                                        const void *image) {
-  (void)module;
-  (void)image;
-  return result(false, CUDA_ERROR_NOT_SUPPORTED);
+  if (module == nullptr || image == nullptr) {
+    return result(false, CUDA_ERROR_INVALID_VALUE);
+  }
+
+  const auto *text = static_cast<const char *>(image);
+  const std::size_t size = std::strlen(text);
+  cudasim::loader::FatbinResult extracted =
+      cudasim::loader::extract_ptx(image, size);
+  if (extracted.cubin_only || extracted.ptx_sources.empty()) {
+    return result(false, CUDA_ERROR_NOT_SUPPORTED);
+  }
+
+  cudasim::ptx::Module parsed =
+      cudasim::ptx::parse_ptx(extracted.ptx_sources.front());
+  const std::uint64_t handle =
+      cudasim::loader::ModuleRegistry::instance().register_module(parsed);
+  *module = reinterpret_cast<CUmodule>(handle);
+  return result(true, CUDA_SUCCESS);
 }
 
 CUDASIM_EXTERN_C CUDASIM_API CUresult cuModuleLoadDataEx(
     CUmodule *module, const void *image, unsigned int num_options, int *options,
     void **option_values) {
-  (void)module;
-  (void)image;
   (void)num_options;
   (void)options;
   (void)option_values;
-  return result(false, CUDA_ERROR_NOT_SUPPORTED);
+  return cuModuleLoadData(module, image);
 }
 
 CUDASIM_EXTERN_C CUDASIM_API CUresult
 cuModuleLoadFatBinary(CUmodule *module, const void *fat_cubin) {
-  (void)module;
-  (void)fat_cubin;
-  return result(false, CUDA_ERROR_NOT_SUPPORTED);
+  return cuModuleLoadData(module, fat_cubin);
 }
 
 CUDASIM_EXTERN_C CUDASIM_API CUresult cuModuleGetFunction(CUfunction *function,
                                                           CUmodule module,
                                                           const char *name) {
-  (void)function;
   (void)module;
-  (void)name;
-  return result(false, CUDA_ERROR_NOT_SUPPORTED);
+  if (function == nullptr || name == nullptr) {
+    return result(false, CUDA_ERROR_INVALID_VALUE);
+  }
+  const cudasim::ptx::Function *found =
+      cudasim::loader::ModuleRegistry::instance().find_function(name);
+  if (found == nullptr) {
+    return result(false, CUDA_ERROR_NOT_SUPPORTED);
+  }
+  *function = reinterpret_cast<CUfunction>(const_cast<char *>(name));
+  return result(true, CUDA_SUCCESS);
 }
 
 CUDASIM_EXTERN_C CUDASIM_API CUresult cuModuleUnload(CUmodule module) {

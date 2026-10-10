@@ -13,6 +13,14 @@ add_library(cudasim_core SHARED
   ../runtime/memory.cpp
   ../runtime/runtime.cpp
   ../runtime/stream.cpp
+  ../ptx/token.cpp
+  ../ptx/lexer.cpp
+  ../ptx/parser.cpp
+  ../ptx/ir.cpp
+  ../ptx/lower.cpp
+  ../ptx/module.cpp
+  ../loader/fatbin.cpp
+  ../loader/module_registry.cpp
 )
 
 target_include_directories(cudasim_core
