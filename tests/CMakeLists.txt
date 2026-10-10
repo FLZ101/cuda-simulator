@@ -7,6 +7,20 @@ cudasim_apply_sanitizers(vector_add_ref)
 
 add_test(NAME smoke.vector_add_ref COMMAND vector_add_ref)
 
+set(GENERATED_PTX_DIR ${CMAKE_CURRENT_BINARY_DIR}/ptx)
+set(GENERATED_VECTOR_ADD_PTX ${GENERATED_PTX_DIR}/vector_add.ptx)
+
+add_custom_command(
+  OUTPUT ${GENERATED_VECTOR_ADD_PTX}
+  COMMAND ${CMAKE_COMMAND} -E make_directory ${GENERATED_PTX_DIR}
+  COMMAND ${CUDAToolkit_NVCC_EXECUTABLE} -ptx -arch=compute_80
+          ${CMAKE_CURRENT_SOURCE_DIR}/ptx/vector_add_kernel.cu
+          -o ${GENERATED_VECTOR_ADD_PTX}
+  DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/ptx/vector_add_kernel.cu
+  VERBATIM
+)
+add_custom_target(generate_test_ptx DEPENDS ${GENERATED_VECTOR_ADD_PTX})
+
 add_executable(ptx_parser_smoke
   ptx/parser_smoke.cpp
 )
@@ -14,10 +28,11 @@ target_compile_features(ptx_parser_smoke PRIVATE cxx_std_20)
 target_include_directories(ptx_parser_smoke PRIVATE ${CMAKE_SOURCE_DIR}/src)
 target_link_libraries(ptx_parser_smoke PRIVATE cudasim_core)
 target_compile_definitions(ptx_parser_smoke PRIVATE
-  PTX_FIXTURE_PATH="${CMAKE_CURRENT_SOURCE_DIR}/ptx/vector_add.ptx"
+  PTX_FIXTURE_PATH="${GENERATED_VECTOR_ADD_PTX}"
 )
 cudasim_set_warnings(ptx_parser_smoke)
 cudasim_apply_sanitizers(ptx_parser_smoke)
+add_dependencies(ptx_parser_smoke generate_test_ptx)
 add_test(NAME ptx.parser_smoke COMMAND ptx_parser_smoke)
 
 add_executable(ptx_fatbin_smoke
@@ -27,10 +42,11 @@ target_compile_features(ptx_fatbin_smoke PRIVATE cxx_std_20)
 target_include_directories(ptx_fatbin_smoke PRIVATE ${CMAKE_SOURCE_DIR}/src)
 target_link_libraries(ptx_fatbin_smoke PRIVATE cudasim_core)
 target_compile_definitions(ptx_fatbin_smoke PRIVATE
-  PTX_FIXTURE_PATH="${CMAKE_CURRENT_SOURCE_DIR}/ptx/vector_add.ptx"
+  PTX_FIXTURE_PATH="${GENERATED_VECTOR_ADD_PTX}"
 )
 cudasim_set_warnings(ptx_fatbin_smoke)
 cudasim_apply_sanitizers(ptx_fatbin_smoke)
+add_dependencies(ptx_fatbin_smoke generate_test_ptx)
 add_test(NAME ptx.fatbin_smoke COMMAND ptx_fatbin_smoke)
 
 add_executable(runtime_api_smoke
@@ -60,10 +76,11 @@ target_compile_features(driver_module_smoke PRIVATE cxx_std_20)
 target_include_directories(driver_module_smoke PRIVATE ${CMAKE_SOURCE_DIR}/src)
 target_link_libraries(driver_module_smoke PRIVATE cuda_shim)
 target_compile_definitions(driver_module_smoke PRIVATE
-  PTX_FIXTURE_PATH="${CMAKE_CURRENT_SOURCE_DIR}/ptx/vector_add.ptx"
+  PTX_FIXTURE_PATH="${GENERATED_VECTOR_ADD_PTX}"
 )
 cudasim_set_warnings(driver_module_smoke)
 cudasim_apply_sanitizers(driver_module_smoke)
+add_dependencies(driver_module_smoke generate_test_ptx)
 add_test(NAME compat.driver_module_smoke COMMAND driver_module_smoke)
 
 add_executable(runtime_registration_smoke
