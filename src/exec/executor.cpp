@@ -744,43 +744,96 @@ bool Executor::execute(const cudasim::ptx::FunctionIR &function,
             config.block[2];
         const std::size_t warp_count = (thread_count + 31) / 32;
 
-        for (std::size_t warp = 0; warp < warp_count; ++warp) {
-          RegisterFile registers{};
-          std::vector<bool> active(32, false);
-          std::vector<std::size_t> pc(32, 0);
+        struct WarpRuntime {
+          RegisterFile registers;
+          std::vector<bool> active;
+          std::vector<bool> blocked;
+          std::vector<std::size_t> pc;
+          bool finished = false;
+        };
 
+        std::vector<WarpRuntime> warps;
+        warps.reserve(warp_count);
+        for (std::size_t warp = 0; warp < warp_count; ++warp) {
+          WarpRuntime runtime;
+          runtime.active.assign(32, false);
+          runtime.blocked.assign(32, false);
+          runtime.pc.assign(32, 0);
           const std::size_t lane_base = warp * 32;
           for (std::size_t lane = 0; lane < 32; ++lane) {
             if (lane_base + lane < thread_count) {
-              active[lane] = true;
+              runtime.active[lane] = true;
+            }
+          }
+          warps.push_back(std::move(runtime));
+        }
+
+        bool block_running = true;
+        while (block_running) {
+          int arrived = 0;
+          bool any_unfinished = false;
+
+          for (std::size_t warp = 0; warp < warps.size(); ++warp) {
+            WarpRuntime &runtime = warps[warp];
+            if (runtime.finished) {
+              continue;
+            }
+
+            bool warp_arrived = false;
+            bool has_active = false;
+            const std::size_t lane_base = warp * 32;
+            for (std::size_t lane = 0; lane < 32; ++lane) {
+              if (!runtime.active[lane] || runtime.blocked[lane]) {
+                continue;
+              }
+              has_active = true;
+              if (runtime.pc[lane] >= flat.size()) {
+                runtime.active[lane] = false;
+                continue;
+              }
+
+              const std::size_t current_pc = runtime.pc[lane];
+              if (flat[current_pc].opcode == "bar.sync") {
+                runtime.blocked[lane] = true;
+                warp_arrived = true;
+                continue;
+              }
+
+              std::size_t next_pc = current_pc + 1;
+              const bool still_active = execute_instruction(
+                  flat[current_pc], config, block, runtime.registers, lane,
+                  lane_base + lane, arguments, parameter_offsets, shared_memory,
+                  shared_offsets, next_pc, current_pc, labels);
+              runtime.pc[lane] = next_pc;
+              if (!still_active) {
+                runtime.active[lane] = false;
+              }
+            }
+
+            if (warp_arrived) {
+              ++arrived;
+              any_unfinished = true;
+            } else if (has_active) {
+              any_unfinished = true;
+            } else {
+              runtime.finished = true;
             }
           }
 
-          bool any_active = true;
-          while (any_active) {
-            any_active = false;
-            for (std::size_t lane = 0; lane < 32; ++lane) {
-              if (!active[lane]) {
-                continue;
-              }
-              if (pc[lane] >= flat.size()) {
-                active[lane] = false;
-                continue;
-              }
-
-              const std::size_t current_pc = pc[lane];
-              std::size_t next_pc = current_pc + 1;
-              const bool still_active = execute_instruction(
-                  flat[current_pc], config, block, registers, lane,
-                  lane_base + lane, arguments, parameter_offsets, shared_memory,
-                  shared_offsets, next_pc, current_pc, labels);
-              pc[lane] = next_pc;
-              if (!still_active) {
-                active[lane] = false;
-              } else {
-                any_active = true;
+          if (arrived > 0 && arrived == static_cast<int>(warps.size())) {
+            for (WarpRuntime &runtime : warps) {
+              for (std::size_t lane = 0; lane < 32; ++lane) {
+                if (runtime.blocked[lane]) {
+                  ++runtime.pc[lane];
+                  runtime.blocked[lane] = false;
+                }
               }
             }
+            arrived = 0;
+          }
+
+          if (!any_unfinished && arrived == 0) {
+            block_running = false;
           }
         }
       }

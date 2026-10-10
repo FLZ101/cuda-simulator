@@ -10,6 +10,7 @@ add_test(NAME smoke.vector_add_ref COMMAND vector_add_ref)
 set(GENERATED_PTX_DIR ${CMAKE_CURRENT_BINARY_DIR}/ptx)
 set(GENERATED_VECTOR_ADD_PTX ${GENERATED_PTX_DIR}/vector_add.ptx)
 set(GENERATED_SHARED_PTX ${GENERATED_PTX_DIR}/shared_memory.ptx)
+set(GENERATED_MULTI_WARP_PTX ${GENERATED_PTX_DIR}/multi_warp_barrier.ptx)
 
 add_custom_command(
   OUTPUT ${GENERATED_VECTOR_ADD_PTX}
@@ -32,6 +33,17 @@ add_custom_command(
   VERBATIM
 )
 add_custom_target(generate_shared_ptx DEPENDS ${GENERATED_SHARED_PTX})
+
+add_custom_command(
+  OUTPUT ${GENERATED_MULTI_WARP_PTX}
+  COMMAND ${CMAKE_COMMAND} -E make_directory ${GENERATED_PTX_DIR}
+  COMMAND ${CUDAToolkit_NVCC_EXECUTABLE} -ptx -arch=compute_80
+          ${CMAKE_CURRENT_SOURCE_DIR}/ptx/multi_warp_barrier_kernel.cu
+          -o ${GENERATED_MULTI_WARP_PTX}
+  DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/ptx/multi_warp_barrier_kernel.cu
+  VERBATIM
+)
+add_custom_target(generate_multi_warp_ptx DEPENDS ${GENERATED_MULTI_WARP_PTX})
 
 add_executable(ptx_parser_smoke
   ptx/parser_smoke.cpp
@@ -88,6 +100,20 @@ cudasim_set_warnings(shared_memory_exec_smoke)
 cudasim_apply_sanitizers(shared_memory_exec_smoke)
 add_dependencies(shared_memory_exec_smoke generate_shared_ptx)
 add_test(NAME ptx.shared_memory_exec_smoke COMMAND shared_memory_exec_smoke)
+
+add_executable(multi_warp_barrier_exec_smoke
+  ptx/multi_warp_barrier_exec_smoke.cpp
+)
+target_compile_features(multi_warp_barrier_exec_smoke PRIVATE cxx_std_20)
+target_include_directories(multi_warp_barrier_exec_smoke PRIVATE ${CMAKE_SOURCE_DIR}/src)
+target_link_libraries(multi_warp_barrier_exec_smoke PRIVATE cuda_shim)
+target_compile_definitions(multi_warp_barrier_exec_smoke PRIVATE
+  PTX_FIXTURE_PATH="${GENERATED_MULTI_WARP_PTX}"
+)
+cudasim_set_warnings(multi_warp_barrier_exec_smoke)
+cudasim_apply_sanitizers(multi_warp_barrier_exec_smoke)
+add_dependencies(multi_warp_barrier_exec_smoke generate_multi_warp_ptx)
+add_test(NAME ptx.multi_warp_barrier_exec_smoke COMMAND multi_warp_barrier_exec_smoke)
 
 add_executable(runtime_api_smoke
   compat/runtime_api_smoke.cpp

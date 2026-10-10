@@ -53,6 +53,10 @@ reference results.
 - files: `tests/ptx/shared_memory_kernel.cu`, `tests/ptx/shared_memory_exec_smoke.cpp`, `tests/CMakeLists.txt`
 - verification: `make test` passed all 13 tests.
 
+- Added a block-level runnable-warp scheduler and a multi-warp barrier test with 64 threads.
+- files: `src/exec/executor.cpp`, `tests/ptx/multi_warp_barrier_kernel.cu`, `tests/ptx/multi_warp_barrier_exec_smoke.cpp`, `tests/CMakeLists.txt`
+- verification: `make test` passed all 14 tests.
+
 ## Verification
 
 Commands run:
@@ -65,14 +69,8 @@ make test
 Result:
 
 ```text
-100% tests passed, 0 tests failed out of 13
+100% tests passed, 0 tests failed out of 14
 ```
-
-Known limitation:
-
-- `bar.sync` is currently a no-op and has only been exercised by a single-warp
-  shared-memory kernel. Multi-warp barrier scheduling is deferred to the next
-  execution-semantics refinement.
 
 ## Status
 
