@@ -922,6 +922,97 @@ PyTorch-generated model runner -> PyTorch CPU reference
 
 The real GPU is still required for this project.
 
+### GPU reference flow for `nvcc` programs
+
+Steps:
+
+1. Compile the CUDA program normally with `nvcc`:
+
+   ```bash
+   nvcc -arch=sm_80 program.cu -o program_gpu
+   ```
+
+2. Run it without simulator shims on the real GPU:
+
+   ```bash
+   ./program_gpu --input input.raw --output gpu_reference.raw
+   ```
+
+3. Run the same host runner with simulator shims:
+
+   ```bash
+   LD_PRELOAD=libcudart_shim.so:libcuda_shim.so \
+     ./program_gpu --input input.raw --output simulator_output.raw
+   ```
+
+4. Compare:
+
+   ```bash
+   python3 tests/differential/compare.py \
+     simulator_output.raw \
+     gpu_reference.raw \
+     1e-4 \
+     1e-5
+   ```
+
+Details:
+
+- The GPU run is the golden reference because it executes the actual CUDA
+  program on real hardware.
+- The simulator run uses the same executable and same input files.
+- The comparison checks tensor values and reports max absolute/relative error.
+- The same random seed and deterministic input must be used for both runs.
+
+### PyTorch CPU reference flow for model-generated runners
+
+Steps:
+
+1. Export or trace the model:
+
+   ```python
+   model.eval()
+   torch.manual_seed(1234)
+   example_input = torch.randn(1, 3, 224, 224)
+   traced = torch.jit.trace(model, example_input)
+   ```
+
+2. Run the model on CPU to produce the reference:
+
+   ```python
+   with torch.no_grad():
+       reference = model(example_input)
+   torch.save(reference, "reference.pt")
+   ```
+
+3. Generate a host runner from the same PyTorch model or traced graph:
+
+   ```text
+   PyTorch/TorchInductor/Triton -> CUDA host runner + PTX
+   ```
+
+4. Run the generated host runner through the simulator:
+
+   ```bash
+   LD_PRELOAD=libcudart_shim.so:libcuda_shim.so \
+     ./model_runner --input input.raw --output simulator_output.raw
+   ```
+
+5. Compare simulator output with the PyTorch CPU reference:
+
+   ```bash
+   python3 tests/models/compare_torch_reference.py \
+     --simulator-output simulator_output.raw \
+     --reference reference.pt
+   ```
+
+Details:
+
+- The PyTorch CPU reference is used for model-level validation.
+- The generated host runner and the PyTorch CPU reference must use identical
+  weights, input tensors, and evaluation mode.
+- For stochastic operations, fix seeds and use greedy/deterministic paths.
+- Compare final logits and, for classification models, predicted class.
+
 Qualification target matrix:
 
 | Operator | Shape family | Reference | Output |
