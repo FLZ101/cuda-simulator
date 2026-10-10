@@ -1,0 +1,6 @@
+FP32_RTOL = 1e-4
+FP32_ATOL = 1e-5
+
+TOLERANCES = {
+    "fp32": (FP32_RTOL, FP32_ATOL),
+}

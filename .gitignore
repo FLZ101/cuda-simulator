@@ -5,3 +5,5 @@ compile_commands.json
 *.so
 *.a
 *.d
+__pycache__/
+*.pyc

@@ -34,10 +34,36 @@ pass within the configured tolerance.
 
 ## Work Log
 
+- Added FP32 tolerance helpers and float list comparison.
+- files: `tests/differential/tolerance.py`, `tests/differential/compare.py`
+- verification: `differential.vector_add` passed.
+
+- Added a differential runner script for the vector-add fixture.
+- files: `tests/differential/run_all.py`
+- verification: `differential.vector_add` passed.
+
+- Added a generated host runner that reads inputs, runs the kernel, and writes output.
+- files: `tests/differential/fixtures/vector_add/host_runner.cpp`, `tests/CMakeLists.txt`
+- verification: `differential.vector_add` passed.
+
+- Wired the differential vector-add test into CTest with `LD_PRELOAD`.
+- files: `tests/CMakeLists.txt`
+- verification: `make test` passed all 18 tests.
+
 ## Verification
 
-Not run yet.
+Commands run:
+
+```bash
+make test
+```
+
+Result:
+
+```text
+100% tests passed, 0 tests failed out of 18
+```
 
 ## Status
 
-in progress
+complete
