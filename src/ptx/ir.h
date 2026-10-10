@@ -18,6 +18,12 @@ struct BasicBlock {
 
 struct FunctionIR {
   std::string name;
+  struct Parameter {
+    std::string name;
+    std::string type;
+    std::size_t size = 0;
+  };
+  std::vector<Parameter> parameters;
   std::vector<BasicBlock> blocks;
 };
 

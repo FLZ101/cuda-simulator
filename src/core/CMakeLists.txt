@@ -21,6 +21,7 @@ add_library(cudasim_core SHARED
   ../ptx/module.cpp
   ../loader/fatbin.cpp
   ../loader/module_registry.cpp
+  ../exec/executor.cpp
 )
 
 target_include_directories(cudasim_core

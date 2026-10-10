@@ -1,8 +1,10 @@
 #include "compat/cuda_api.h"
 #include "compat/export.h"
 #include "core/compat_state.h"
+#include "exec/executor.h"
 #include "loader/fatbin.h"
 #include "loader/module_registry.h"
+#include "ptx/lower.h"
 #include "ptx/module.h"
 #include "runtime/runtime.h"
 
@@ -10,6 +12,7 @@
 #include <cstddef>
 #include <cstring>
 #include <memory>
+#include <vector>
 
 namespace {
 
@@ -577,18 +580,45 @@ cuLaunchKernel(CUfunction function, unsigned int grid_x, unsigned int grid_y,
                unsigned int grid_z, unsigned int block_x, unsigned int block_y,
                unsigned int block_z, unsigned int shared_mem, CUstream stream,
                void **params, void **extra) {
-  (void)function;
-  (void)grid_x;
-  (void)grid_y;
-  (void)grid_z;
-  (void)block_x;
-  (void)block_y;
-  (void)block_z;
-  (void)shared_mem;
   (void)stream;
-  (void)params;
   (void)extra;
-  return result(false, CUDA_ERROR_NOT_SUPPORTED);
+
+  if (function == nullptr || params == nullptr) {
+    return result(false, CUDA_ERROR_INVALID_VALUE);
+  }
+
+  const auto *name = reinterpret_cast<const char *>(function);
+  const cudasim::ptx::Function *found =
+      cudasim::loader::ModuleRegistry::instance().find_function(name);
+  if (found == nullptr) {
+    return result(false, CUDA_ERROR_NOT_SUPPORTED);
+  }
+
+  cudasim::ptx::Module module;
+  module.functions.push_back(*found);
+  cudasim::ptx::ModuleIR ir = cudasim::ptx::lower(module);
+  if (ir.functions.empty()) {
+    return result(false, CUDA_ERROR_NOT_SUPPORTED);
+  }
+
+  cudasim::exec::LaunchConfig config;
+  config.grid = {grid_x, grid_y, grid_z};
+  config.block = {block_x, block_y, block_z};
+  config.shared_memory = shared_mem;
+
+  std::vector<std::uint8_t> arguments;
+  for (std::size_t i = 0; i < found->parameters.size(); ++i) {
+    const std::size_t size = found->parameters[i].size;
+    const auto *src = static_cast<const std::uint8_t *>(params[i]);
+    arguments.insert(arguments.end(), src, src + size);
+  }
+
+  cudasim::exec::Executor executor;
+  if (!executor.execute(ir.functions.front(), config, arguments)) {
+    return result(false, CUDA_ERROR_NOT_SUPPORTED);
+  }
+
+  return result(true, CUDA_SUCCESS);
 }
 
 CUDASIM_EXTERN_C CUDASIM_API const char *cuGetErrorName(CUresult code) {

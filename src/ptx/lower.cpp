@@ -13,6 +13,10 @@ ModuleIR lower(const Module &module) {
   for (const Function &function : module.functions) {
     FunctionIR function_ir;
     function_ir.name = function.name;
+    for (const auto &parameter : function.parameters) {
+      function_ir.parameters.push_back(FunctionIR::Parameter{
+          parameter.name, parameter.type, parameter.size});
+    }
     function_ir.blocks.emplace_back();
 
     for (const Instruction &instruction : function.instructions) {

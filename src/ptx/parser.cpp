@@ -171,7 +171,30 @@ Function Parser::parse_function() {
 
   while (current_.kind != TokenKind::LBrace &&
          current_.kind != TokenKind::End) {
-    consume();
+    if (current_.kind == TokenKind::Dot) {
+      consume();
+      const std::string qualifier =
+          expect(TokenKind::Identifier, "expected parameter qualifier").text;
+      if (qualifier != "param") {
+        continue;
+      }
+
+      expect(TokenKind::Dot, "expected parameter type");
+      const std::string type = read_identifier_path();
+      const std::string name =
+          expect(TokenKind::Identifier, "expected parameter name").text;
+      std::size_t size = 8;
+      if (type == "u32" || type == "b32" || type == "f32") {
+        size = 4;
+      } else if (type == "u16" || type == "b16" || type == "f16") {
+        size = 2;
+      } else if (type == "u8" || type == "b8") {
+        size = 1;
+      }
+      function.parameters.push_back(Function::Parameter{name, type, size});
+    } else {
+      consume();
+    }
   }
   expect(TokenKind::LBrace, "expected '{' before function body");
 

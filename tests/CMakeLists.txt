@@ -49,6 +49,20 @@ cudasim_apply_sanitizers(ptx_fatbin_smoke)
 add_dependencies(ptx_fatbin_smoke generate_test_ptx)
 add_test(NAME ptx.fatbin_smoke COMMAND ptx_fatbin_smoke)
 
+add_executable(vector_add_exec_smoke
+  ptx/vector_add_exec_smoke.cpp
+)
+target_compile_features(vector_add_exec_smoke PRIVATE cxx_std_20)
+target_include_directories(vector_add_exec_smoke PRIVATE ${CMAKE_SOURCE_DIR}/src)
+target_link_libraries(vector_add_exec_smoke PRIVATE cuda_shim)
+target_compile_definitions(vector_add_exec_smoke PRIVATE
+  PTX_FIXTURE_PATH="${GENERATED_VECTOR_ADD_PTX}"
+)
+cudasim_set_warnings(vector_add_exec_smoke)
+cudasim_apply_sanitizers(vector_add_exec_smoke)
+add_dependencies(vector_add_exec_smoke generate_test_ptx)
+add_test(NAME ptx.vector_add_exec_smoke COMMAND vector_add_exec_smoke)
+
 add_executable(runtime_api_smoke
   compat/runtime_api_smoke.cpp
 )

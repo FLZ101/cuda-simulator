@@ -1,0 +1,543 @@
+#include "exec/executor.h"
+
+#include "exec/block.h"
+#include "exec/register_file.h"
+#include "ptx/lexer.h"
+#include "ptx/token.h"
+
+#include <algorithm>
+#include <cstddef>
+#include <cstdint>
+#include <cstring>
+#include <optional>
+#include <string>
+#include <unordered_map>
+#include <utility>
+#include <vector>
+
+namespace cudasim::exec {
+
+namespace {
+
+struct FlatInstruction {
+  std::string opcode;
+  std::string predicate;
+  std::string operands;
+  std::vector<cudasim::ptx::Token> operand_tokens;
+  std::vector<cudasim::ptx::Token> predicate_tokens;
+};
+
+std::vector<cudasim::ptx::Token> tokenize(const std::string &text) {
+  cudasim::ptx::Lexer lexer(text);
+  std::vector<cudasim::ptx::Token> tokens;
+  for (;;) {
+    cudasim::ptx::Token token = lexer.next();
+    if (token.kind == cudasim::ptx::TokenKind::End) {
+      break;
+    }
+    tokens.push_back(std::move(token));
+  }
+  return tokens;
+}
+
+struct RegisterRef {
+  std::size_t index = 0;
+  int size = 4;
+};
+
+std::optional<RegisterRef>
+parse_register(const std::vector<cudasim::ptx::Token> &tokens,
+               std::size_t &pos) {
+  while (pos < tokens.size() &&
+         tokens[pos].kind == cudasim::ptx::TokenKind::Comma) {
+    ++pos;
+  }
+  if (pos >= tokens.size() ||
+      tokens[pos].kind != cudasim::ptx::TokenKind::Percent) {
+    return std::nullopt;
+  }
+  ++pos;
+  if (pos >= tokens.size() ||
+      tokens[pos].kind != cudasim::ptx::TokenKind::Identifier) {
+    return std::nullopt;
+  }
+
+  const std::string name = tokens[pos].text;
+  ++pos;
+
+  char bank = 'r';
+  std::size_t number_start = 0;
+  if (name.size() >= 2 && name[0] == 'r' && name[1] == 'd') {
+    bank = 'd';
+    number_start = 2;
+  } else if (name.size() >= 2 && name[0] == 'f') {
+    bank = 'f';
+    number_start = 1;
+  } else if (!name.empty() && name[0] == 'r') {
+    bank = 'r';
+    number_start = 1;
+  } else {
+    return std::nullopt;
+  }
+
+  std::size_t index = 0;
+  for (std::size_t i = number_start; i < name.size(); ++i) {
+    index = index * 10 + static_cast<std::size_t>(name[i] - '0');
+  }
+
+  RegisterRef ref;
+  std::size_t base = 0;
+  if (bank == 'd') {
+    base = 64;
+  } else if (bank == 'f') {
+    base = 128;
+  }
+  ref.index = base + index;
+  ref.size = (bank == 'd' || bank == 'f') ? 8 : 4;
+  return ref;
+}
+
+std::uint32_t special_register_u32(const std::string &name,
+                                   const LaunchConfig &config,
+                                   const BlockInfo &block,
+                                   std::size_t lane_in_block,
+                                   std::size_t lane) {
+  const unsigned int block_id_x = block.index[0];
+  const unsigned int block_dim_x = config.block[0];
+  const unsigned int grid_dim_x = config.grid[0];
+  if (name == "%tid.x") {
+    return static_cast<std::uint32_t>(lane_in_block);
+  }
+  if (name == "%ntid.x") {
+    return block_dim_x;
+  }
+  if (name == "%ctaid.x") {
+    return block_id_x;
+  }
+  if (name == "%nctaid.x") {
+    return grid_dim_x;
+  }
+  if (name == "%laneid") {
+    return static_cast<std::uint32_t>(lane % 32);
+  }
+  if (name == "%warpid") {
+    return static_cast<std::uint32_t>(lane / 32);
+  }
+  return 0;
+}
+
+bool parse_predicate(const std::vector<cudasim::ptx::Token> &tokens,
+                     const RegisterFile &registers, std::size_t lane) {
+  if (tokens.empty()) {
+    return true;
+  }
+
+  bool negate = false;
+  std::size_t pos = 0;
+  if (tokens[pos].kind == cudasim::ptx::TokenKind::Exclaim) {
+    negate = true;
+    ++pos;
+  }
+  if (pos >= tokens.size() ||
+      tokens[pos].kind != cudasim::ptx::TokenKind::Percent) {
+    return true;
+  }
+  ++pos;
+  if (pos >= tokens.size() ||
+      tokens[pos].kind != cudasim::ptx::TokenKind::Identifier) {
+    return true;
+  }
+  const std::string name = tokens[pos].text;
+  std::size_t index = 0;
+  for (std::size_t i = 1; i < name.size(); ++i) {
+    index = index * 10 + static_cast<std::size_t>(name[i] - '0');
+  }
+  if (index >= registers.predicates.size()) {
+    return true;
+  }
+  const bool value = registers.predicates[index][lane];
+  return negate ? !value : value;
+}
+
+std::size_t
+find_label(const std::unordered_map<std::string, std::size_t> &labels,
+           const std::string &label) {
+  const auto it = labels.find(label);
+  return it == labels.end() ? 0 : it->second;
+}
+
+bool execute_instruction(
+    const FlatInstruction &instruction, const LaunchConfig &config,
+    const BlockInfo &block, RegisterFile &registers, std::size_t lane,
+    std::size_t lane_in_block, const std::vector<std::uint8_t> &arguments,
+    const std::unordered_map<std::string, std::size_t> &parameter_offsets,
+    std::size_t &next_pc, std::size_t pc,
+    const std::unordered_map<std::string, std::size_t> &labels) {
+  const std::string &opcode = instruction.opcode;
+
+  if (opcode == "ret" || opcode == "exit") {
+    return false;
+  }
+
+  if (opcode == "bra") {
+    if (!parse_predicate(instruction.predicate_tokens, registers, lane)) {
+      next_pc = pc + 1;
+      return true;
+    }
+    if (instruction.operand_tokens.empty()) {
+      next_pc = pc + 1;
+      return true;
+    }
+    if (instruction.operand_tokens[0].kind == cudasim::ptx::TokenKind::Dollar) {
+      std::string label = "$";
+      for (std::size_t i = 1; i < instruction.operand_tokens.size(); ++i) {
+        label += instruction.operand_tokens[i].text;
+      }
+      next_pc = find_label(labels, label);
+    } else {
+      next_pc = pc + 1;
+    }
+    return true;
+  }
+
+  if (opcode == "ld.param.u64" || opcode == "ld.param.u32" ||
+      opcode == "ld.param.f32") {
+    std::size_t pos = 0;
+    auto dst = parse_register(instruction.operand_tokens, pos);
+    if (!dst || pos >= instruction.operand_tokens.size()) {
+      return false;
+    }
+    while (pos < instruction.operand_tokens.size() &&
+           instruction.operand_tokens[pos].kind !=
+               cudasim::ptx::TokenKind::LBracket) {
+      ++pos;
+    }
+    if (pos >= instruction.operand_tokens.size()) {
+      return false;
+    }
+    ++pos;
+    if (pos >= instruction.operand_tokens.size()) {
+      return false;
+    }
+    const std::string param_name = instruction.operand_tokens[pos].text;
+    const auto it = parameter_offsets.find(param_name);
+    if (it == parameter_offsets.end()) {
+      return false;
+    }
+    const std::size_t offset = it->second;
+    std::uint64_t value = 0;
+    const std::size_t bytes = std::min<std::size_t>(
+        static_cast<std::size_t>(dst->size), arguments.size() - offset);
+    std::memcpy(&value, arguments.data() + offset, bytes);
+    registers.values[dst->index][lane] = value;
+    next_pc = pc + 1;
+    return true;
+  }
+
+  if (opcode == "mov.u32") {
+    std::size_t pos = 0;
+    auto dst = parse_register(instruction.operand_tokens, pos);
+    if (!dst) {
+      return false;
+    }
+    while (pos < instruction.operand_tokens.size() &&
+           instruction.operand_tokens[pos].kind !=
+               cudasim::ptx::TokenKind::Percent) {
+      ++pos;
+    }
+    if (pos >= instruction.operand_tokens.size()) {
+      return false;
+    }
+    const std::size_t reg_start = pos;
+    std::size_t ignored = pos;
+    auto src = parse_register(instruction.operand_tokens, ignored);
+    if (src) {
+      registers.values[dst->index][lane] =
+          static_cast<std::uint32_t>(registers.values[src->index][lane]);
+    } else {
+      std::string special;
+      for (std::size_t i = reg_start; i < instruction.operand_tokens.size();
+           ++i) {
+        special += instruction.operand_tokens[i].text;
+      }
+      registers.values[dst->index][lane] =
+          special_register_u32(special, config, block, lane_in_block, lane);
+    }
+    next_pc = pc + 1;
+    return true;
+  }
+
+  if (opcode == "mad.lo.s32") {
+    std::size_t pos = 0;
+    auto dst = parse_register(instruction.operand_tokens, pos);
+    auto a = parse_register(instruction.operand_tokens, pos);
+    auto b = parse_register(instruction.operand_tokens, pos);
+    auto c = parse_register(instruction.operand_tokens, pos);
+    if (!dst || !a || !b || !c) {
+      return false;
+    }
+    const auto av = static_cast<std::int32_t>(registers.values[a->index][lane]);
+    const auto bv = static_cast<std::int32_t>(registers.values[b->index][lane]);
+    const auto cv = static_cast<std::int32_t>(registers.values[c->index][lane]);
+    const auto result = static_cast<std::uint32_t>(av * bv + cv);
+    registers.values[dst->index][lane] = result;
+    next_pc = pc + 1;
+    return true;
+  }
+
+  if (opcode == "setp.ge.s32") {
+    std::size_t pos = 0;
+    if (pos >= instruction.operand_tokens.size() ||
+        instruction.operand_tokens[pos].kind !=
+            cudasim::ptx::TokenKind::Percent) {
+      return false;
+    }
+    ++pos;
+    const std::string pred_name = instruction.operand_tokens[pos++].text;
+    std::size_t pred_index = 0;
+    for (std::size_t i = 1; i < pred_name.size(); ++i) {
+      pred_index =
+          pred_index * 10 + static_cast<std::size_t>(pred_name[i] - '0');
+    }
+    auto a = parse_register(instruction.operand_tokens, pos);
+    auto b = parse_register(instruction.operand_tokens, pos);
+    if (!a || !b || pred_index >= registers.predicates.size()) {
+      return false;
+    }
+    const auto av = static_cast<std::int32_t>(registers.values[a->index][lane]);
+    const auto bv = static_cast<std::int32_t>(registers.values[b->index][lane]);
+    registers.predicates[pred_index][lane] = av >= bv;
+    next_pc = pc + 1;
+    return true;
+  }
+
+  if (opcode == "cvta.to.global.u64") {
+    std::size_t pos = 0;
+    auto dst = parse_register(instruction.operand_tokens, pos);
+    auto src = parse_register(instruction.operand_tokens, pos);
+    if (!dst || !src) {
+      return false;
+    }
+    registers.values[dst->index][lane] = registers.values[src->index][lane];
+    next_pc = pc + 1;
+    return true;
+  }
+
+  if (opcode == "mul.wide.s32") {
+    std::size_t pos = 0;
+    auto dst = parse_register(instruction.operand_tokens, pos);
+    auto a = parse_register(instruction.operand_tokens, pos);
+    while (pos < instruction.operand_tokens.size() &&
+           instruction.operand_tokens[pos].kind ==
+               cudasim::ptx::TokenKind::Comma) {
+      ++pos;
+    }
+    if (!dst || !a || pos >= instruction.operand_tokens.size()) {
+      return false;
+    }
+    std::int64_t av =
+        static_cast<std::int32_t>(registers.values[a->index][lane]);
+    std::int64_t bv = 0;
+    if (instruction.operand_tokens[pos].kind ==
+        cudasim::ptx::TokenKind::Number) {
+      bv = std::stoll(instruction.operand_tokens[pos].text);
+    } else {
+      auto b = parse_register(instruction.operand_tokens, pos);
+      if (!b) {
+        return false;
+      }
+      bv = static_cast<std::int32_t>(registers.values[b->index][lane]);
+    }
+    registers.values[dst->index][lane] = static_cast<std::uint64_t>(av * bv);
+    next_pc = pc + 1;
+    return true;
+  }
+
+  if (opcode == "add.s64") {
+    std::size_t pos = 0;
+    auto dst = parse_register(instruction.operand_tokens, pos);
+    auto a = parse_register(instruction.operand_tokens, pos);
+    auto b = parse_register(instruction.operand_tokens, pos);
+    if (!dst || !a || !b) {
+      return false;
+    }
+    registers.values[dst->index][lane] =
+        registers.values[a->index][lane] + registers.values[b->index][lane];
+    next_pc = pc + 1;
+    return true;
+  }
+
+  if (opcode == "ld.global.f32") {
+    std::size_t pos = 0;
+    auto dst = parse_register(instruction.operand_tokens, pos);
+    if (!dst) {
+      return false;
+    }
+    while (pos < instruction.operand_tokens.size() &&
+           instruction.operand_tokens[pos].kind !=
+               cudasim::ptx::TokenKind::LBracket) {
+      ++pos;
+    }
+    if (pos >= instruction.operand_tokens.size()) {
+      return false;
+    }
+    ++pos;
+    auto address = parse_register(instruction.operand_tokens, pos);
+    if (!address) {
+      return false;
+    }
+    const auto *ptr =
+        reinterpret_cast<const float *>(registers.values[address->index][lane]);
+    std::uint32_t bits = 0;
+    std::memcpy(&bits, ptr, sizeof(bits));
+    registers.values[dst->index][lane] = bits;
+    next_pc = pc + 1;
+    return true;
+  }
+
+  if (opcode == "add.f32") {
+    std::size_t pos = 0;
+    auto dst = parse_register(instruction.operand_tokens, pos);
+    auto a = parse_register(instruction.operand_tokens, pos);
+    auto b = parse_register(instruction.operand_tokens, pos);
+    if (!dst || !a || !b) {
+      return false;
+    }
+    float av = 0.0F;
+    float bv = 0.0F;
+    std::memcpy(&av, &registers.values[a->index][lane], sizeof(av));
+    std::memcpy(&bv, &registers.values[b->index][lane], sizeof(bv));
+    const float result = av + bv;
+    std::uint32_t bits = 0;
+    std::memcpy(&bits, &result, sizeof(bits));
+    registers.values[dst->index][lane] = bits;
+    next_pc = pc + 1;
+    return true;
+  }
+
+  if (opcode == "st.global.f32") {
+    std::size_t pos = 0;
+    while (pos < instruction.operand_tokens.size() &&
+           instruction.operand_tokens[pos].kind !=
+               cudasim::ptx::TokenKind::LBracket) {
+      ++pos;
+    }
+    if (pos >= instruction.operand_tokens.size()) {
+      return false;
+    }
+    ++pos;
+    auto address = parse_register(instruction.operand_tokens, pos);
+    while (pos < instruction.operand_tokens.size() &&
+           instruction.operand_tokens[pos].kind !=
+               cudasim::ptx::TokenKind::Percent) {
+      ++pos;
+    }
+    auto value = parse_register(instruction.operand_tokens, pos);
+    if (!address || !value) {
+      return false;
+    }
+    auto *ptr =
+        reinterpret_cast<float *>(registers.values[address->index][lane]);
+    float fv = 0.0F;
+    std::memcpy(&fv, &registers.values[value->index][lane], sizeof(fv));
+    *ptr = fv;
+    next_pc = pc + 1;
+    return true;
+  }
+
+  next_pc = pc + 1;
+  return true;
+}
+
+} // namespace
+
+bool Executor::execute(const cudasim::ptx::FunctionIR &function,
+                       const LaunchConfig &config,
+                       const std::vector<std::uint8_t> &arguments) {
+  std::unordered_map<std::string, std::size_t> parameter_offsets;
+  std::size_t offset = 0;
+  for (const auto &parameter : function.parameters) {
+    parameter_offsets[parameter.name] = offset;
+    offset += parameter.size;
+  }
+
+  std::vector<FlatInstruction> flat;
+  std::unordered_map<std::string, std::size_t> labels;
+  for (const auto &block : function.blocks) {
+    if (!block.label.empty()) {
+      labels[block.label] = flat.size();
+    }
+    for (const auto &instruction : block.instructions) {
+      FlatInstruction decoded;
+      decoded.opcode = instruction.opcode;
+      decoded.predicate = instruction.predicate;
+      decoded.operands = instruction.operands;
+      decoded.operand_tokens = tokenize(instruction.operands);
+      decoded.predicate_tokens = tokenize(instruction.predicate);
+      flat.push_back(std::move(decoded));
+    }
+  }
+
+  const unsigned int grid_x = config.grid[0];
+  const unsigned int grid_y = config.grid[1];
+  const unsigned int grid_z = config.grid[2];
+
+  for (unsigned int gz = 0; gz < grid_z; ++gz) {
+    for (unsigned int gy = 0; gy < grid_y; ++gy) {
+      for (unsigned int gx = 0; gx < grid_x; ++gx) {
+        BlockInfo block;
+        block.index = {gx, gy, gz};
+        block.dim = config.block;
+
+        const std::size_t thread_count =
+            static_cast<std::size_t>(config.block[0]) * config.block[1] *
+            config.block[2];
+        const std::size_t warp_count = (thread_count + 31) / 32;
+
+        for (std::size_t warp = 0; warp < warp_count; ++warp) {
+          RegisterFile registers{};
+          std::vector<bool> active(32, false);
+          std::vector<std::size_t> pc(32, 0);
+
+          const std::size_t lane_base = warp * 32;
+          for (std::size_t lane = 0; lane < 32; ++lane) {
+            if (lane_base + lane < thread_count) {
+              active[lane] = true;
+            }
+          }
+
+          bool any_active = true;
+          while (any_active) {
+            any_active = false;
+            for (std::size_t lane = 0; lane < 32; ++lane) {
+              if (!active[lane]) {
+                continue;
+              }
+              if (pc[lane] >= flat.size()) {
+                active[lane] = false;
+                continue;
+              }
+
+              const std::size_t current_pc = pc[lane];
+              std::size_t next_pc = current_pc + 1;
+              const bool still_active = execute_instruction(
+                  flat[current_pc], config, block, registers, lane,
+                  lane_base + lane, arguments, parameter_offsets, next_pc,
+                  current_pc, labels);
+              pc[lane] = next_pc;
+              if (!still_active) {
+                active[lane] = false;
+              } else {
+                any_active = true;
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+
+  return true;
+}
+
+} // namespace cudasim::exec
