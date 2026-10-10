@@ -38,10 +38,43 @@ access patterns and basic atomics.
 
 ## Work Log
 
+- Added a bounds-checked host-backed device buffer.
+- files: `src/mem/device_memory.h`, `src/mem/device_memory.cpp`, `src/core/CMakeLists.txt`
+- verification: `mem.memory_model_smoke` passed.
+
+- Added access-pattern classification and coalesced read/write helpers.
+- files: `src/mem/access_pattern.h`, `src/mem/coalescer.h`, `src/mem/coalescer.cpp`
+- verification: `mem.memory_model_smoke` passed.
+
+- Added basic 32-bit integer and float atomic add operations.
+- files: `src/mem/atomics.h`, `src/mem/atomics.cpp`
+- verification: `mem.memory_model_smoke` passed.
+
+- Added a focused memory-model smoke test.
+- files: `tests/mem/memory_model_smoke.cpp`, `tests/CMakeLists.txt`
+- verification: `make test` passed all 15 tests.
+
 ## Verification
 
-Not run yet.
+Commands run:
+
+```bash
+make format
+make test
+```
+
+Result:
+
+```text
+100% tests passed, 0 tests failed out of 15
+```
+
+Known limitation:
+
+- The coalescer and atomics are currently standalone helpers. The PTX executor
+  still uses per-lane scalar loads/stores; integration into generated kernels is
+  a later performance refinement.
 
 ## Status
 
-in progress
+complete

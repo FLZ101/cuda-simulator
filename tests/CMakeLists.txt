@@ -7,6 +7,16 @@ cudasim_apply_sanitizers(vector_add_ref)
 
 add_test(NAME smoke.vector_add_ref COMMAND vector_add_ref)
 
+add_executable(memory_model_smoke
+  mem/memory_model_smoke.cpp
+)
+target_compile_features(memory_model_smoke PRIVATE cxx_std_20)
+target_include_directories(memory_model_smoke PRIVATE ${CMAKE_SOURCE_DIR}/src)
+target_link_libraries(memory_model_smoke PRIVATE cudasim_core)
+cudasim_set_warnings(memory_model_smoke)
+cudasim_apply_sanitizers(memory_model_smoke)
+add_test(NAME mem.memory_model_smoke COMMAND memory_model_smoke)
+
 set(GENERATED_PTX_DIR ${CMAKE_CURRENT_BINARY_DIR}/ptx)
 set(GENERATED_VECTOR_ADD_PTX ${GENERATED_PTX_DIR}/vector_add.ptx)
 set(GENERATED_SHARED_PTX ${GENERATED_PTX_DIR}/shared_memory.ptx)
