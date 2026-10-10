@@ -54,6 +54,10 @@ access patterns and basic atomics.
 - files: `tests/mem/memory_model_smoke.cpp`, `tests/CMakeLists.txt`
 - verification: `make test` passed all 15 tests.
 
+- Integrated coalesced global `f32` loads/stores and `atom.add.global.f32/u32` into the PTX executor.
+- files: `src/exec/executor.cpp`, `src/mem/coalescer.h`, `src/mem/coalescer.cpp`
+- verification: existing vector-add, shared-memory, and multi-warp tests still passed.
+
 ## Verification
 
 Commands run:
@@ -68,12 +72,6 @@ Result:
 ```text
 100% tests passed, 0 tests failed out of 15
 ```
-
-Known limitation:
-
-- The coalescer and atomics are currently standalone helpers. The PTX executor
-  still uses per-lane scalar loads/stores; integration into generated kernels is
-  a later performance refinement.
 
 ## Status
 

@@ -2,6 +2,8 @@
 
 #include "exec/block.h"
 #include "exec/register_file.h"
+#include "mem/atomics.h"
+#include "mem/coalescer.h"
 #include "ptx/lexer.h"
 #include "ptx/token.h"
 
@@ -180,6 +182,79 @@ std::size_t type_size(const std::string &type) {
     return 8;
   }
   return 4;
+}
+
+bool coalesced_global_f32(const FlatInstruction &instruction,
+                          RegisterFile &registers,
+                          const std::vector<std::size_t> &lanes, bool store) {
+  std::size_t pos = 0;
+
+  if (!store) {
+    auto dst = parse_register(instruction.operand_tokens, pos);
+    if (!dst) {
+      return false;
+    }
+    while (pos < instruction.operand_tokens.size() &&
+           instruction.operand_tokens[pos].kind !=
+               cudasim::ptx::TokenKind::LBracket) {
+      ++pos;
+    }
+    if (pos >= instruction.operand_tokens.size()) {
+      return false;
+    }
+    ++pos;
+    auto address = parse_register(instruction.operand_tokens, pos);
+    if (!address) {
+      return false;
+    }
+
+    std::vector<const void *> addresses;
+    addresses.reserve(lanes.size());
+    for (const std::size_t lane : lanes) {
+      addresses.push_back(reinterpret_cast<const void *>(
+          registers.values[address->index][lane]));
+    }
+
+    std::vector<std::uint32_t> values;
+    cudasim::mem::coalesced_read_u32_pointers(addresses, values);
+    for (std::size_t i = 0; i < lanes.size(); ++i) {
+      registers.values[dst->index][lanes[i]] = values[i];
+    }
+    return true;
+  }
+
+  while (pos < instruction.operand_tokens.size() &&
+         instruction.operand_tokens[pos].kind !=
+             cudasim::ptx::TokenKind::LBracket) {
+    ++pos;
+  }
+  if (pos >= instruction.operand_tokens.size()) {
+    return false;
+  }
+  ++pos;
+  auto address = parse_register(instruction.operand_tokens, pos);
+  while (pos < instruction.operand_tokens.size() &&
+         instruction.operand_tokens[pos].kind !=
+             cudasim::ptx::TokenKind::Percent) {
+    ++pos;
+  }
+  auto value = parse_register(instruction.operand_tokens, pos);
+  if (!address || !value) {
+    return false;
+  }
+
+  std::vector<void *> addresses;
+  std::vector<std::uint32_t> values;
+  addresses.reserve(lanes.size());
+  values.reserve(lanes.size());
+  for (const std::size_t lane : lanes) {
+    addresses.push_back(
+        reinterpret_cast<void *>(registers.values[address->index][lane]));
+    values.push_back(
+        static_cast<std::uint32_t>(registers.values[value->index][lane]));
+  }
+  cudasim::mem::coalesced_write_u32_pointers(addresses, values);
+  return true;
 }
 
 bool execute_instruction(
@@ -681,6 +756,44 @@ bool execute_instruction(
     return true;
   }
 
+  if (opcode == "atom.add.global.f32" || opcode == "atom.add.global.u32") {
+    std::size_t pos = 0;
+    while (pos < instruction.operand_tokens.size() &&
+           instruction.operand_tokens[pos].kind !=
+               cudasim::ptx::TokenKind::LBracket) {
+      ++pos;
+    }
+    if (pos >= instruction.operand_tokens.size()) {
+      return false;
+    }
+    ++pos;
+    auto address = parse_register(instruction.operand_tokens, pos);
+    while (pos < instruction.operand_tokens.size() &&
+           instruction.operand_tokens[pos].kind !=
+               cudasim::ptx::TokenKind::Percent) {
+      ++pos;
+    }
+    auto value = parse_register(instruction.operand_tokens, pos);
+    if (!address || !value) {
+      return false;
+    }
+
+    if (opcode == "atom.add.global.f32") {
+      float fv = 0.0F;
+      std::memcpy(&fv, &registers.values[value->index][lane], sizeof(fv));
+      cudasim::mem::atomic_add_f32(
+          reinterpret_cast<float *>(registers.values[address->index][lane]),
+          fv);
+    } else {
+      cudasim::mem::atomic_add_u32(
+          reinterpret_cast<std::uint32_t *>(
+              registers.values[address->index][lane]),
+          static_cast<std::uint32_t>(registers.values[value->index][lane]));
+    }
+    next_pc = pc + 1;
+    return true;
+  }
+
   next_pc = pc + 1;
   return true;
 }
@@ -782,6 +895,35 @@ bool Executor::execute(const cudasim::ptx::FunctionIR &function,
             bool warp_arrived = false;
             bool has_active = false;
             const std::size_t lane_base = warp * 32;
+
+            std::vector<std::size_t> active_lanes;
+            for (std::size_t lane = 0; lane < 32; ++lane) {
+              if (runtime.active[lane] && !runtime.blocked[lane]) {
+                active_lanes.push_back(lane);
+              }
+            }
+
+            if (!active_lanes.empty()) {
+              const std::size_t common_pc = runtime.pc[active_lanes.front()];
+              bool same_pc = true;
+              for (const std::size_t lane : active_lanes) {
+                same_pc = same_pc && runtime.pc[lane] == common_pc;
+              }
+              if (same_pc && common_pc < flat.size() &&
+                  (flat[common_pc].opcode == "ld.global.f32" ||
+                   flat[common_pc].opcode == "st.global.f32")) {
+                const bool store = flat[common_pc].opcode == "st.global.f32";
+                if (coalesced_global_f32(flat[common_pc], runtime.registers,
+                                         active_lanes, store)) {
+                  for (const std::size_t lane : active_lanes) {
+                    ++runtime.pc[lane];
+                  }
+                  any_unfinished = true;
+                  continue;
+                }
+              }
+            }
+
             for (std::size_t lane = 0; lane < 32; ++lane) {
               if (!runtime.active[lane] || runtime.blocked[lane]) {
                 continue;

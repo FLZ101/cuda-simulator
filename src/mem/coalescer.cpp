@@ -34,6 +34,40 @@ AccessPattern classify(const std::vector<std::size_t> &offsets) {
   return AccessPattern::kDivergent;
 }
 
+AccessPattern classify_pointers(const std::vector<const void *> &addresses) {
+  if (addresses.empty()) {
+    return AccessPattern::kUniform;
+  }
+
+  const auto address_value = [](const void *ptr) {
+    return reinterpret_cast<std::uintptr_t>(ptr);
+  };
+
+  bool uniform = true;
+  bool contiguous = true;
+  bool strided = true;
+  for (std::size_t i = 1; i < addresses.size(); ++i) {
+    uniform = uniform && addresses[i] == addresses[0];
+    contiguous = contiguous &&
+                 address_value(addresses[i]) ==
+                     address_value(addresses[i - 1]) + sizeof(std::uint32_t);
+    strided = strided &&
+              address_value(addresses[i]) - address_value(addresses[i - 1]) ==
+                  address_value(addresses[1]) - address_value(addresses[0]);
+  }
+
+  if (uniform) {
+    return AccessPattern::kUniform;
+  }
+  if (contiguous) {
+    return AccessPattern::kContiguous;
+  }
+  if (strided) {
+    return AccessPattern::kStrided;
+  }
+  return AccessPattern::kDivergent;
+}
+
 void coalesced_read_u32(const DeviceBuffer &buffer,
                         const std::vector<std::size_t> &offsets,
                         std::vector<std::uint32_t> &output) {
@@ -109,6 +143,58 @@ void coalesced_write_u32(DeviceBuffer &buffer,
         throw std::out_of_range("device buffer write");
       }
       std::memcpy(buffer.data() + offsets[i], &values[i], sizeof(values[i]));
+    }
+    return;
+  }
+}
+
+void coalesced_read_u32_pointers(const std::vector<const void *> &addresses,
+                                 std::vector<std::uint32_t> &output) {
+  output.resize(addresses.size());
+  if (addresses.empty()) {
+    return;
+  }
+
+  switch (classify_pointers(addresses)) {
+  case AccessPattern::kUniform:
+    std::memcpy(&output[0], addresses[0], sizeof(std::uint32_t));
+    std::fill(output.begin(), output.end(), output[0]);
+    return;
+  case AccessPattern::kContiguous:
+    std::memcpy(output.data(), addresses[0],
+                output.size() * sizeof(std::uint32_t));
+    return;
+  case AccessPattern::kStrided:
+  case AccessPattern::kDivergent:
+    for (std::size_t i = 0; i < addresses.size(); ++i) {
+      std::memcpy(&output[i], addresses[i], sizeof(std::uint32_t));
+    }
+    return;
+  }
+}
+
+void coalesced_write_u32_pointers(const std::vector<void *> &addresses,
+                                  const std::vector<std::uint32_t> &values) {
+  if (addresses.size() != values.size()) {
+    throw std::invalid_argument("address/value size mismatch");
+  }
+  if (addresses.empty()) {
+    return;
+  }
+
+  switch (classify_pointers(
+      std::vector<const void *>(addresses.begin(), addresses.end()))) {
+  case AccessPattern::kUniform:
+    std::memcpy(addresses[0], &values[0], sizeof(std::uint32_t));
+    return;
+  case AccessPattern::kContiguous:
+    std::memcpy(addresses[0], values.data(),
+                values.size() * sizeof(std::uint32_t));
+    return;
+  case AccessPattern::kStrided:
+  case AccessPattern::kDivergent:
+    for (std::size_t i = 0; i < addresses.size(); ++i) {
+      std::memcpy(addresses[i], &values[i], sizeof(std::uint32_t));
     }
     return;
   }
