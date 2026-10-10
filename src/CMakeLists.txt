@@ -1,0 +1,3 @@
+add_subdirectory(core)
+add_subdirectory(compat)
+add_subdirectory(cli)
