@@ -886,7 +886,8 @@ tests/fixtures/<operator>/
 Harness behavior:
 
 1. Run generated host program under `LD_PRELOAD`.
-2. Run the same host program on the real GPU to produce the golden output.
+2. Produce the golden output on the real GPU, or with a PyTorch CPU reference
+   when the host runner is generated from a PyTorch model.
 3. Compare tensors.
 4. Report max absolute/relative error.
 
@@ -901,8 +902,8 @@ integer: exact
 ### Step 8.5: Operator Execution Qualification Gate
 
 Before ResNet or GPT-2 integration, every generated operator kernel must be
-executed through the simulator and compared with a real GPU reference. PTX
-generation and SIMT-gate checks are not sufficient.
+executed through the simulator and compared with a real GPU reference or a
+PyTorch CPU reference. PTX generation and SIMT-gate checks are not sufficient.
 
 When a CUDA-capable GPU is available, use it as the primary golden oracle:
 
@@ -911,30 +912,31 @@ When a CUDA-capable GPU is available, use it as the primary golden oracle:
 3. Run the same host runner with `LD_PRELOAD` simulator shims.
 4. Compare simulator output with the GPU golden output.
 
-The real GPU is the required golden reference for this project.
+The real GPU is required for this project, and PyTorch CPU reference output is
+also accepted when the generated host runner is produced from a PyTorch model.
 
 Qualification target matrix:
 
 | Operator | Shape family | Reference | Output |
 | --- | --- | --- | --- |
-| elementwise add/mul/relu | `N` or `B,C,H,W` | GPU golden output | tensor |
-| saxpy | `N` | GPU golden output | tensor |
-| copy | `N` | GPU golden output | tensor |
-| reduction | `N -> 1` | GPU golden output | scalar |
-| transpose | `H,W -> W,H` | GPU golden output | tensor |
-| naive matmul | `MxNxK` | GPU golden output | tensor |
-| tiled matmul | `MxNxK` | GPU golden output | tensor |
-| softmax | `B,S,D` per row | GPU golden output | tensor |
-| layer norm | `B,S,D` per row | GPU golden output | tensor |
-| attention scores | `B,H,S,D` | GPU golden output | tensor |
-| embedding lookup | `tokens,D` | GPU golden output | tensor |
-| Conv2d naive | `1,C,H,W` | GPU golden output | tensor |
-| Conv2d im2col | `1,C,H,W` | GPU golden output | tensor |
-| Conv2d shared | `1,C,H,W` | GPU golden output | tensor |
-| max/avg pool | `1,C,H,W` | GPU golden output | tensor |
-| bias add | `B,C,H,W` | GPU golden output | tensor |
-| batch norm | `B,C,H,W` | GPU golden output | tensor |
-| GELU | `N` | GPU golden output | tensor |
+| elementwise add/mul/relu | `N` or `B,C,H,W` | GPU or PyTorch CPU reference | tensor |
+| saxpy | `N` | GPU or PyTorch CPU reference | tensor |
+| copy | `N` | GPU or PyTorch CPU reference | tensor |
+| reduction | `N -> 1` | GPU or PyTorch CPU reference | scalar |
+| transpose | `H,W -> W,H` | GPU or PyTorch CPU reference | tensor |
+| naive matmul | `MxNxK` | GPU or PyTorch CPU reference | tensor |
+| tiled matmul | `MxNxK` | GPU or PyTorch CPU reference | tensor |
+| softmax | `B,S,D` per row | GPU or PyTorch CPU reference | tensor |
+| layer norm | `B,S,D` per row | GPU or PyTorch CPU reference | tensor |
+| attention scores | `B,H,S,D` | GPU or PyTorch CPU reference | tensor |
+| embedding lookup | `tokens,D` | GPU or PyTorch CPU reference | tensor |
+| Conv2d naive | `1,C,H,W` | GPU or PyTorch CPU reference | tensor |
+| Conv2d im2col | `1,C,H,W` | GPU or PyTorch CPU reference | tensor |
+| Conv2d shared | `1,C,H,W` | GPU or PyTorch CPU reference | tensor |
+| max/avg pool | `1,C,H,W` | GPU or PyTorch CPU reference | tensor |
+| bias add | `B,C,H,W` | GPU or PyTorch CPU reference | tensor |
+| batch norm | `B,C,H,W` | GPU or PyTorch CPU reference | tensor |
+| GELU | `N` | GPU or PyTorch CPU reference | tensor |
 
 For each operator:
 
@@ -1155,7 +1157,7 @@ model end-to-end tests passing
 Bottom-up:
 
 1. Component tests for shims, memory, streams, events, and PTX parsing.
-2. Kernel differential tests against real GPU golden output.
+2. Kernel differential tests against real GPU or PyTorch CPU golden output.
 3. Operator tests for Conv2d, GEMM, elementwise, reduction, softmax, layer
    norm, and attention.
 4. End-to-end ResNet and GPT-2 tests.
