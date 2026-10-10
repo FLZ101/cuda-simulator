@@ -1,5 +1,6 @@
 #include "ptx/lower.h"
 
+#include <string>
 #include <utility>
 
 namespace cudasim::ptx {
@@ -9,6 +10,17 @@ ModuleIR lower(const Module &module) {
   result.version = module.version;
   result.target = module.target;
   result.address_size = module.address_size;
+
+  for (const VariableDecl &variable : module.variables) {
+    VariableIR ir_variable;
+    ir_variable.space = variable.space;
+    ir_variable.type = variable.type;
+    ir_variable.name = variable.name;
+    ir_variable.size = variable.size.empty() ? 0 : std::stoull(variable.size);
+    ir_variable.align =
+        variable.align.empty() ? 0 : std::stoull(variable.align);
+    result.variables.push_back(std::move(ir_variable));
+  }
 
   for (const Function &function : module.functions) {
     FunctionIR function_ir;

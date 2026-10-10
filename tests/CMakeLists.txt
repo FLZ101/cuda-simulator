@@ -9,6 +9,7 @@ add_test(NAME smoke.vector_add_ref COMMAND vector_add_ref)
 
 set(GENERATED_PTX_DIR ${CMAKE_CURRENT_BINARY_DIR}/ptx)
 set(GENERATED_VECTOR_ADD_PTX ${GENERATED_PTX_DIR}/vector_add.ptx)
+set(GENERATED_SHARED_PTX ${GENERATED_PTX_DIR}/shared_memory.ptx)
 
 add_custom_command(
   OUTPUT ${GENERATED_VECTOR_ADD_PTX}
@@ -20,6 +21,17 @@ add_custom_command(
   VERBATIM
 )
 add_custom_target(generate_test_ptx DEPENDS ${GENERATED_VECTOR_ADD_PTX})
+
+add_custom_command(
+  OUTPUT ${GENERATED_SHARED_PTX}
+  COMMAND ${CMAKE_COMMAND} -E make_directory ${GENERATED_PTX_DIR}
+  COMMAND ${CUDAToolkit_NVCC_EXECUTABLE} -ptx -arch=compute_80
+          ${CMAKE_CURRENT_SOURCE_DIR}/ptx/shared_memory_kernel.cu
+          -o ${GENERATED_SHARED_PTX}
+  DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/ptx/shared_memory_kernel.cu
+  VERBATIM
+)
+add_custom_target(generate_shared_ptx DEPENDS ${GENERATED_SHARED_PTX})
 
 add_executable(ptx_parser_smoke
   ptx/parser_smoke.cpp
@@ -62,6 +74,20 @@ cudasim_set_warnings(vector_add_exec_smoke)
 cudasim_apply_sanitizers(vector_add_exec_smoke)
 add_dependencies(vector_add_exec_smoke generate_test_ptx)
 add_test(NAME ptx.vector_add_exec_smoke COMMAND vector_add_exec_smoke)
+
+add_executable(shared_memory_exec_smoke
+  ptx/shared_memory_exec_smoke.cpp
+)
+target_compile_features(shared_memory_exec_smoke PRIVATE cxx_std_20)
+target_include_directories(shared_memory_exec_smoke PRIVATE ${CMAKE_SOURCE_DIR}/src)
+target_link_libraries(shared_memory_exec_smoke PRIVATE cuda_shim)
+target_compile_definitions(shared_memory_exec_smoke PRIVATE
+  PTX_FIXTURE_PATH="${GENERATED_SHARED_PTX}"
+)
+cudasim_set_warnings(shared_memory_exec_smoke)
+cudasim_apply_sanitizers(shared_memory_exec_smoke)
+add_dependencies(shared_memory_exec_smoke generate_shared_ptx)
+add_test(NAME ptx.shared_memory_exec_smoke COMMAND shared_memory_exec_smoke)
 
 add_executable(runtime_api_smoke
   compat/runtime_api_smoke.cpp

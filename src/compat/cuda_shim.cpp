@@ -588,16 +588,25 @@ cuLaunchKernel(CUfunction function, unsigned int grid_x, unsigned int grid_y,
   }
 
   const auto *name = reinterpret_cast<const char *>(function);
-  const cudasim::ptx::Function *found =
-      cudasim::loader::ModuleRegistry::instance().find_function(name);
-  if (found == nullptr) {
+  const cudasim::ptx::Module *owner =
+      cudasim::loader::ModuleRegistry::instance().find_module_for_function(
+          name);
+  if (owner == nullptr) {
     return result(false, CUDA_ERROR_NOT_SUPPORTED);
   }
 
-  cudasim::ptx::Module module;
-  module.functions.push_back(*found);
-  cudasim::ptx::ModuleIR ir = cudasim::ptx::lower(module);
+  cudasim::ptx::ModuleIR ir = cudasim::ptx::lower(*owner);
   if (ir.functions.empty()) {
+    return result(false, CUDA_ERROR_NOT_SUPPORTED);
+  }
+  const cudasim::ptx::FunctionIR *function_ir = nullptr;
+  for (const auto &candidate : ir.functions) {
+    if (candidate.name == name) {
+      function_ir = &candidate;
+      break;
+    }
+  }
+  if (function_ir == nullptr) {
     return result(false, CUDA_ERROR_NOT_SUPPORTED);
   }
 
@@ -607,14 +616,14 @@ cuLaunchKernel(CUfunction function, unsigned int grid_x, unsigned int grid_y,
   config.shared_memory = shared_mem;
 
   std::vector<std::uint8_t> arguments;
-  for (std::size_t i = 0; i < found->parameters.size(); ++i) {
-    const std::size_t size = found->parameters[i].size;
+  for (std::size_t i = 0; i < function_ir->parameters.size(); ++i) {
+    const std::size_t size = function_ir->parameters[i].size;
     const auto *src = static_cast<const std::uint8_t *>(params[i]);
     arguments.insert(arguments.end(), src, src + size);
   }
 
   cudasim::exec::Executor executor;
-  if (!executor.execute(ir.functions.front(), config, arguments)) {
+  if (!executor.execute(*function_ir, config, arguments, ir.variables)) {
     return result(false, CUDA_ERROR_NOT_SUPPORTED);
   }
 

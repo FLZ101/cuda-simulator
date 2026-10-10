@@ -27,10 +27,19 @@ struct FunctionIR {
   std::vector<BasicBlock> blocks;
 };
 
+struct VariableIR {
+  std::string space;
+  std::string type;
+  std::string name;
+  std::size_t size = 0;
+  std::size_t align = 0;
+};
+
 struct ModuleIR {
   std::string version;
   std::string target;
   std::string address_size;
+  std::vector<VariableIR> variables;
   std::vector<FunctionIR> functions;
 };
 

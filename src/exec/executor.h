@@ -12,7 +12,8 @@ class Executor {
 public:
   bool execute(const cudasim::ptx::FunctionIR &function,
                const LaunchConfig &config,
-               const std::vector<std::uint8_t> &arguments);
+               const std::vector<std::uint8_t> &arguments,
+               const std::vector<cudasim::ptx::VariableIR> &variables = {});
 };
 
 } // namespace cudasim::exec

@@ -37,10 +37,43 @@ reference results.
 
 ## Work Log
 
+- Added PTX variable declaration parsing inside function bodies for `.shared`, `.local`, and `.const`.
+- files: `src/ptx/parser.h`, `src/ptx/parser.cpp`, `src/ptx/ast.h`, `src/ptx/ir.h`, `src/ptx/lower.cpp`
+- verification: `ptx.parser_smoke` and `ptx.fatbin_smoke` passed.
+
+- Extended the executor with shared-memory allocation, `ld.shared`, `st.shared`, `bar.sync`, `shl.b32`, `add.s32`, `setp.ne.s32`, and immediate operands.
+- files: `src/exec/executor.h`, `src/exec/executor.cpp`
+- verification: `ptx.shared_memory_exec_smoke` passed.
+
+- Fixed module lookup so `cuLaunchKernel` retains module-level shared variables.
+- files: `src/loader/module_registry.h`, `src/loader/module_registry.cpp`, `src/compat/cuda_shim.cpp`
+- verification: `ptx.shared_memory_exec_smoke` passed.
+
+- Added an `nvcc`-generated shared-memory reduction execution test.
+- files: `tests/ptx/shared_memory_kernel.cu`, `tests/ptx/shared_memory_exec_smoke.cpp`, `tests/CMakeLists.txt`
+- verification: `make test` passed all 13 tests.
+
 ## Verification
 
-Not run yet.
+Commands run:
+
+```bash
+make format
+make test
+```
+
+Result:
+
+```text
+100% tests passed, 0 tests failed out of 13
+```
+
+Known limitation:
+
+- `bar.sync` is currently a no-op and has only been exercised by a single-warp
+  shared-memory kernel. Multi-warp barrier scheduling is deferred to the next
+  execution-semantics refinement.
 
 ## Status
 
-in progress
+complete

@@ -24,7 +24,7 @@ Module Parser::parse() {
     }
 
     if (current_.kind == TokenKind::Identifier) {
-      module.functions.push_back(parse_function());
+      module.functions.push_back(parse_function(module));
       continue;
     }
 
@@ -132,7 +132,7 @@ void Parser::parse_directive(Module &module) {
         const std::string qualifier =
             expect(TokenKind::Identifier, "expected qualifier").text;
         if (qualifier == "entry" || qualifier == "func") {
-          module.functions.push_back(parse_function());
+          module.functions.push_back(parse_function(module));
           return;
         }
         continue;
@@ -141,7 +141,7 @@ void Parser::parse_directive(Module &module) {
       if (current_.kind == TokenKind::Identifier) {
         const std::string qualifier = consume().text;
         if (qualifier == "entry" || qualifier == "func") {
-          module.functions.push_back(parse_function());
+          module.functions.push_back(parse_function(module));
           return;
         }
         continue;
@@ -159,7 +159,7 @@ void Parser::parse_directive(Module &module) {
   throw std::runtime_error("unsupported PTX directive: ." + name);
 }
 
-Function Parser::parse_function() {
+Function Parser::parse_function(Module &module) {
   Function function;
 
   if (current_.kind == TokenKind::Identifier) {
@@ -203,6 +203,18 @@ Function Parser::parse_function() {
     skip_newlines();
     if (current_.kind == TokenKind::RBrace) {
       break;
+    }
+    if (current_.kind == TokenKind::Dot) {
+      consume();
+      const std::string qualifier =
+          expect(TokenKind::Identifier, "expected directive").text;
+      if (qualifier == "shared" || qualifier == "local" ||
+          qualifier == "const") {
+        module.variables.push_back(parse_variable(qualifier));
+        continue;
+      }
+      read_until_semicolon();
+      continue;
     }
     function.instructions.push_back(parse_instruction());
   }
@@ -255,23 +267,35 @@ VariableDecl Parser::parse_variable(const std::string &space) {
   VariableDecl variable;
   variable.space = space;
 
-  if (current_.kind == TokenKind::Identifier && current_.text == "align") {
-    variable.align = consume().text;
-    variable.align += " " + consume().text;
+  if (current_.kind == TokenKind::Dot) {
+    consume();
+    const std::string first =
+        expect(TokenKind::Identifier, "expected variable qualifier").text;
+    if (first == "align") {
+      variable.align = expect(TokenKind::Number, "expected alignment").text;
+      if (current_.kind == TokenKind::Dot) {
+        consume();
+        variable.type =
+            expect(TokenKind::Identifier, "expected variable type").text;
+      }
+    } else {
+      variable.type = first;
+    }
+  } else {
+    variable.type = read_identifier_path();
   }
 
-  variable.type = read_identifier_path();
-  variable.name = consume().text;
+  variable.name = expect(TokenKind::Identifier, "expected variable name").text;
+
+  if (current_.kind == TokenKind::LBracket) {
+    consume();
+    variable.size = expect(TokenKind::Number, "expected array size").text;
+    expect(TokenKind::RBracket, "expected ']'");
+  }
 
   while (current_.kind != TokenKind::Semicolon &&
          current_.kind != TokenKind::End) {
-    if (current_.kind == TokenKind::LBracket) {
-      consume();
-      variable.size = consume().text;
-      expect(TokenKind::RBracket, "expected ']'");
-    } else {
-      consume();
-    }
+    consume();
   }
   expect(TokenKind::Semicolon, "expected semicolon after variable");
   return variable;

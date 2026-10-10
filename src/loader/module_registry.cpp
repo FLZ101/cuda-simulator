@@ -36,6 +36,19 @@ ModuleRegistry::find_function(const std::string &name) const {
   return nullptr;
 }
 
+const cudasim::ptx::Module *
+ModuleRegistry::find_module_for_function(const std::string &name) const {
+  for (const auto &[handle, module] : modules_) {
+    (void)handle;
+    for (const auto &function : module.functions) {
+      if (function.name == name) {
+        return &module;
+      }
+    }
+  }
+  return nullptr;
+}
+
 void ModuleRegistry::register_runtime_function(
     std::uint64_t module_handle, const std::string &host_name,
     const std::string &function_name) {

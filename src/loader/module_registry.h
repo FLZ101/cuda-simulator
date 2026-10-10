@@ -23,6 +23,8 @@ public:
   std::uint64_t register_module(const cudasim::ptx::Module &module);
   const cudasim::ptx::Module *find_module(std::uint64_t handle) const;
   const cudasim::ptx::Function *find_function(const std::string &name) const;
+  const cudasim::ptx::Module *
+  find_module_for_function(const std::string &name) const;
   void register_runtime_function(std::uint64_t module_handle,
                                  const std::string &host_name,
                                  const std::string &function_name);
