@@ -1,0 +1,47 @@
+# Step 6: Memory Model and Coalescing
+
+## Objective
+
+Add a host-backed memory model, access classification, coalesced access, and
+basic atomics.
+
+## Plan
+
+- Add device memory ranges and bounds checking.
+- Add access-pattern classification.
+- Add a coalescer for uniform, contiguous, strided, and divergent patterns.
+- Add basic global-memory atomics.
+- Add focused memory-model tests.
+
+## Files To Create
+
+```text
+steps/STEP_06.md
+src/mem/device_memory.h
+src/mem/device_memory.cpp
+src/mem/access_pattern.h
+src/mem/coalescer.h
+src/mem/coalescer.cpp
+src/mem/atomics.h
+src/mem/atomics.cpp
+tests/mem/memory_model_smoke.cpp
+```
+
+## Acceptance Checks
+
+```bash
+make test
+```
+
+Memory microbenchmarks must handle uniform, contiguous, strided, and divergent
+access patterns and basic atomics.
+
+## Work Log
+
+## Verification
+
+Not run yet.
+
+## Status
+
+in progress
