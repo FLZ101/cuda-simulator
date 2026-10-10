@@ -58,6 +58,10 @@ pass within the configured tolerance.
 - files: `tests/kernels/*.cu`, `tests/CMakeLists.txt`
 - verification: `make test` passed and all generated PTX passed the SIMT gate.
 
+- Added more convolution and transformer-related operator sources: direct/im2col/shared convolution, bias add, batch norm, pooling, layer norm, attention scores, embedding lookup, and GELU.
+- files: `tests/kernels/*.cu`, `tests/CMakeLists.txt`
+- verification: `make test` passed and all generated PTX passed the SIMT gate.
+
 ## Verification
 
 Commands run:

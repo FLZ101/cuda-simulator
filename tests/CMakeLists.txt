@@ -30,6 +30,26 @@ set(GENERATED_TRANSPOSE_PTX ${GENERATED_PTX_DIR}/transpose.ptx)
 set(GENERATED_RELU_PTX ${GENERATED_PTX_DIR}/relu.ptx)
 set(GENERATED_SOFTMAX_PTX ${GENERATED_PTX_DIR}/softmax_row.ptx)
 
+set(CLASSIC_KERNEL_NAMES
+  matmul_naive
+  matmul_tiled
+  reduce_sum
+  transpose
+  relu
+  softmax_row
+  conv2d_naive
+  conv2d_im2col
+  conv2d_shared
+  bias_add
+  batch_norm
+  max_pool2d
+  avg_pool2d
+  layer_norm
+  attention_scores
+  embedding_lookup
+  gelu
+)
+
 add_custom_command(
   OUTPUT ${GENERATED_VECTOR_ADD_PTX}
   COMMAND ${CMAKE_COMMAND} -E make_directory ${GENERATED_PTX_DIR}
@@ -85,14 +105,7 @@ add_custom_command(
 )
 add_custom_target(generate_copy_ptx DEPENDS ${GENERATED_COPY_PTX})
 
-foreach(kernel IN ITEMS
-    matmul_naive
-    matmul_tiled
-    reduce_sum
-    transpose
-    relu
-    softmax_row
-)
+foreach(kernel IN LISTS CLASSIC_KERNEL_NAMES)
   add_custom_command(
     OUTPUT ${GENERATED_PTX_DIR}/${kernel}.ptx
     COMMAND ${CMAKE_COMMAND} -E make_directory ${GENERATED_PTX_DIR}
@@ -105,7 +118,17 @@ foreach(kernel IN ITEMS
   add_custom_target(generate_${kernel}_ptx ALL
     DEPENDS ${GENERATED_PTX_DIR}/${kernel}.ptx
   )
+  list(APPEND CLASSIC_KERNEL_PTX ${GENERATED_PTX_DIR}/${kernel}.ptx)
 endforeach()
+
+set(ALL_GENERATED_PTX
+  ${GENERATED_VECTOR_ADD_PTX}
+  ${GENERATED_SHARED_PTX}
+  ${GENERATED_MULTI_WARP_PTX}
+  ${GENERATED_SAXPY_PTX}
+  ${GENERATED_COPY_PTX}
+  ${CLASSIC_KERNEL_PTX}
+)
 
 add_executable(ptx_parser_smoke
   ptx/parser_smoke.cpp
@@ -180,33 +203,13 @@ add_test(NAME ptx.multi_warp_barrier_exec_smoke COMMAND multi_warp_barrier_exec_
 add_test(
   NAME ptx.simt_gate
   COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/generated/check_simt.py
-          ${GENERATED_VECTOR_ADD_PTX}
-          ${GENERATED_SHARED_PTX}
-          ${GENERATED_MULTI_WARP_PTX}
-          ${GENERATED_SAXPY_PTX}
-          ${GENERATED_COPY_PTX}
-          ${GENERATED_MATMUL_NAIVE_PTX}
-          ${GENERATED_MATMUL_TILED_PTX}
-          ${GENERATED_REDUCE_SUM_PTX}
-          ${GENERATED_TRANSPOSE_PTX}
-          ${GENERATED_RELU_PTX}
-          ${GENERATED_SOFTMAX_PTX}
+          ${ALL_GENERATED_PTX}
 )
 
 add_test(
   NAME ptx.coverage_report
   COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/generated/run_coverage.py
-          ${GENERATED_VECTOR_ADD_PTX}
-          ${GENERATED_SHARED_PTX}
-          ${GENERATED_MULTI_WARP_PTX}
-          ${GENERATED_SAXPY_PTX}
-          ${GENERATED_COPY_PTX}
-          ${GENERATED_MATMUL_NAIVE_PTX}
-          ${GENERATED_MATMUL_TILED_PTX}
-          ${GENERATED_REDUCE_SUM_PTX}
-          ${GENERATED_TRANSPOSE_PTX}
-          ${GENERATED_RELU_PTX}
-          ${GENERATED_SOFTMAX_PTX}
+          ${ALL_GENERATED_PTX}
 )
 
 add_executable(diff_vector_add_runner
