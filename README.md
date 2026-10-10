@@ -19,6 +19,7 @@ Additional documentation:
 - Ninja
 - C++20 compiler
 - CUDA toolkit with `nvcc`
+- CUDA-capable GPU with `nvidia-smi`
 - clang-format
 - optional LLVM development package when `CUDA_SIM_ENABLE_JIT=ON`
 

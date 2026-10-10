@@ -772,8 +772,8 @@ Test sizes:
 0, 1, 31, 32, 33, 1023, 1024, 4097
 ```
 
-Exit: the generated vector-add program runs under `LD_PRELOAD` and matches a
-CPU reference.
+Exit: the generated vector-add program runs under `LD_PRELOAD` and matches the
+real GPU golden output.
 
 ### Step 5: Full Execution Semantics
 
@@ -886,7 +886,7 @@ tests/fixtures/<operator>/
 Harness behavior:
 
 1. Run generated host program under `LD_PRELOAD`.
-2. Run PyTorch CPU reference.
+2. Run the same host program on the real GPU to produce the golden output.
 3. Compare tensors.
 4. Report max absolute/relative error.
 
@@ -901,31 +901,40 @@ integer: exact
 ### Step 8.5: Operator Execution Qualification Gate
 
 Before ResNet or GPT-2 integration, every generated operator kernel must be
-executed through the simulator and compared with a CPU reference. PTX
+executed through the simulator and compared with a real GPU reference. PTX
 generation and SIMT-gate checks are not sufficient.
+
+When a CUDA-capable GPU is available, use it as the primary golden oracle:
+
+1. Run the generated host runner without simulator shims on the real GPU.
+2. Store the GPU output as the golden reference.
+3. Run the same host runner with `LD_PRELOAD` simulator shims.
+4. Compare simulator output with the GPU golden output.
+
+The real GPU is the required golden reference for this project.
 
 Qualification target matrix:
 
 | Operator | Shape family | Reference | Output |
 | --- | --- | --- | --- |
-| elementwise add/mul/relu | `N` or `B,C,H,W` | CPU reference | tensor |
-| saxpy | `N` | CPU reference | tensor |
-| copy | `N` | CPU reference | tensor |
-| reduction | `N -> 1` | CPU reference | scalar |
-| transpose | `H,W -> W,H` | CPU reference | tensor |
-| naive matmul | `MxNxK` | CPU reference | tensor |
-| tiled matmul | `MxNxK` | CPU reference | tensor |
-| softmax | `B,S,D` per row | CPU reference | tensor |
-| layer norm | `B,S,D` per row | CPU reference | tensor |
-| attention scores | `B,H,S,D` | CPU reference | tensor |
-| embedding lookup | `tokens,D` | CPU reference | tensor |
-| Conv2d naive | `1,C,H,W` | CPU reference | tensor |
-| Conv2d im2col | `1,C,H,W` | CPU reference | tensor |
-| Conv2d shared | `1,C,H,W` | CPU reference | tensor |
-| max/avg pool | `1,C,H,W` | CPU reference | tensor |
-| bias add | `B,C,H,W` | CPU reference | tensor |
-| batch norm | `B,C,H,W` | CPU reference | tensor |
-| GELU | `N` | CPU reference | tensor |
+| elementwise add/mul/relu | `N` or `B,C,H,W` | GPU golden output | tensor |
+| saxpy | `N` | GPU golden output | tensor |
+| copy | `N` | GPU golden output | tensor |
+| reduction | `N -> 1` | GPU golden output | scalar |
+| transpose | `H,W -> W,H` | GPU golden output | tensor |
+| naive matmul | `MxNxK` | GPU golden output | tensor |
+| tiled matmul | `MxNxK` | GPU golden output | tensor |
+| softmax | `B,S,D` per row | GPU golden output | tensor |
+| layer norm | `B,S,D` per row | GPU golden output | tensor |
+| attention scores | `B,H,S,D` | GPU golden output | tensor |
+| embedding lookup | `tokens,D` | GPU golden output | tensor |
+| Conv2d naive | `1,C,H,W` | GPU golden output | tensor |
+| Conv2d im2col | `1,C,H,W` | GPU golden output | tensor |
+| Conv2d shared | `1,C,H,W` | GPU golden output | tensor |
+| max/avg pool | `1,C,H,W` | GPU golden output | tensor |
+| bias add | `B,C,H,W` | GPU golden output | tensor |
+| batch norm | `B,C,H,W` | GPU golden output | tensor |
+| GELU | `N` | GPU golden output | tensor |
 
 For each operator:
 
@@ -1146,7 +1155,7 @@ model end-to-end tests passing
 Bottom-up:
 
 1. Component tests for shims, memory, streams, events, and PTX parsing.
-2. Kernel differential tests against PyTorch CPU.
+2. Kernel differential tests against real GPU golden output.
 3. Operator tests for Conv2d, GEMM, elementwise, reduction, softmax, layer
    norm, and attention.
 4. End-to-end ResNet and GPT-2 tests.

@@ -9,6 +9,20 @@ include(cmake/SimulatorOptions.cmake)
 find_package(CUDAToolkit REQUIRED)
 message(STATUS "Found CUDA toolkit ${CUDAToolkit_VERSION}")
 message(STATUS "nvcc: ${CUDAToolkit_NVCC_EXECUTABLE}")
+
+find_program(NVIDIA_SMI_EXECUTABLE nvidia-smi REQUIRED)
+execute_process(
+  COMMAND ${NVIDIA_SMI_EXECUTABLE} -L
+  RESULT_VARIABLE NVIDIA_SMI_RESULT
+  OUTPUT_VARIABLE NVIDIA_SMI_OUTPUT
+  ERROR_QUIET
+)
+if(NOT NVIDIA_SMI_RESULT EQUAL 0 OR NVIDIA_SMI_OUTPUT STREQUAL "")
+  message(FATAL_ERROR "A CUDA-capable GPU is required for this project")
+endif()
+string(REGEX REPLACE "\n.*" "" NVIDIA_GPU_NAME "${NVIDIA_SMI_OUTPUT}")
+message(STATUS "GPU detected: ${NVIDIA_GPU_NAME}")
+
 set(CMAKE_CUDA_COMPILER "${CUDAToolkit_NVCC_EXECUTABLE}")
 enable_language(CUDA)
 
