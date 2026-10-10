@@ -538,6 +538,49 @@ bool execute_instruction(
     return true;
   }
 
+  if (opcode == "mul.f32") {
+    std::size_t pos = 0;
+    auto dst = parse_register(instruction.operand_tokens, pos);
+    auto a = parse_register(instruction.operand_tokens, pos);
+    auto b = parse_register(instruction.operand_tokens, pos);
+    if (!dst || !a || !b) {
+      return false;
+    }
+    float av = 0.0F;
+    float bv = 0.0F;
+    std::memcpy(&av, &registers.values[a->index][lane], sizeof(av));
+    std::memcpy(&bv, &registers.values[b->index][lane], sizeof(bv));
+    const float result = av * bv;
+    std::uint32_t bits = 0;
+    std::memcpy(&bits, &result, sizeof(bits));
+    registers.values[dst->index][lane] = bits;
+    next_pc = pc + 1;
+    return true;
+  }
+
+  if (opcode == "fma.rn.f32") {
+    std::size_t pos = 0;
+    auto dst = parse_register(instruction.operand_tokens, pos);
+    auto a = parse_register(instruction.operand_tokens, pos);
+    auto b = parse_register(instruction.operand_tokens, pos);
+    auto c = parse_register(instruction.operand_tokens, pos);
+    if (!dst || !a || !b || !c) {
+      return false;
+    }
+    float av = 0.0F;
+    float bv = 0.0F;
+    float cv = 0.0F;
+    std::memcpy(&av, &registers.values[a->index][lane], sizeof(av));
+    std::memcpy(&bv, &registers.values[b->index][lane], sizeof(bv));
+    std::memcpy(&cv, &registers.values[c->index][lane], sizeof(cv));
+    const float result = av * bv + cv;
+    std::uint32_t bits = 0;
+    std::memcpy(&bits, &result, sizeof(bits));
+    registers.values[dst->index][lane] = bits;
+    next_pc = pc + 1;
+    return true;
+  }
+
   if (opcode == "st.global.f32") {
     std::size_t pos = 0;
     while (pos < instruction.operand_tokens.size() &&

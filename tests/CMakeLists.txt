@@ -21,6 +21,8 @@ set(GENERATED_PTX_DIR ${CMAKE_CURRENT_BINARY_DIR}/ptx)
 set(GENERATED_VECTOR_ADD_PTX ${GENERATED_PTX_DIR}/vector_add.ptx)
 set(GENERATED_SHARED_PTX ${GENERATED_PTX_DIR}/shared_memory.ptx)
 set(GENERATED_MULTI_WARP_PTX ${GENERATED_PTX_DIR}/multi_warp_barrier.ptx)
+set(GENERATED_SAXPY_PTX ${GENERATED_PTX_DIR}/saxpy.ptx)
+set(GENERATED_COPY_PTX ${GENERATED_PTX_DIR}/copy.ptx)
 
 add_custom_command(
   OUTPUT ${GENERATED_VECTOR_ADD_PTX}
@@ -54,6 +56,28 @@ add_custom_command(
   VERBATIM
 )
 add_custom_target(generate_multi_warp_ptx DEPENDS ${GENERATED_MULTI_WARP_PTX})
+
+add_custom_command(
+  OUTPUT ${GENERATED_SAXPY_PTX}
+  COMMAND ${CMAKE_COMMAND} -E make_directory ${GENERATED_PTX_DIR}
+  COMMAND ${CUDAToolkit_NVCC_EXECUTABLE} -ptx -arch=compute_80
+          ${CMAKE_CURRENT_SOURCE_DIR}/kernels/saxpy.cu
+          -o ${GENERATED_SAXPY_PTX}
+  DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/kernels/saxpy.cu
+  VERBATIM
+)
+add_custom_target(generate_saxpy_ptx DEPENDS ${GENERATED_SAXPY_PTX})
+
+add_custom_command(
+  OUTPUT ${GENERATED_COPY_PTX}
+  COMMAND ${CMAKE_COMMAND} -E make_directory ${GENERATED_PTX_DIR}
+  COMMAND ${CUDAToolkit_NVCC_EXECUTABLE} -ptx -arch=compute_80
+          ${CMAKE_CURRENT_SOURCE_DIR}/kernels/copy.cu
+          -o ${GENERATED_COPY_PTX}
+  DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/kernels/copy.cu
+  VERBATIM
+)
+add_custom_target(generate_copy_ptx DEPENDS ${GENERATED_COPY_PTX})
 
 add_executable(ptx_parser_smoke
   ptx/parser_smoke.cpp
@@ -131,6 +155,8 @@ add_test(
           ${GENERATED_VECTOR_ADD_PTX}
           ${GENERATED_SHARED_PTX}
           ${GENERATED_MULTI_WARP_PTX}
+          ${GENERATED_SAXPY_PTX}
+          ${GENERATED_COPY_PTX}
 )
 
 add_test(
@@ -139,6 +165,8 @@ add_test(
           ${GENERATED_VECTOR_ADD_PTX}
           ${GENERATED_SHARED_PTX}
           ${GENERATED_MULTI_WARP_PTX}
+          ${GENERATED_SAXPY_PTX}
+          ${GENERATED_COPY_PTX}
 )
 
 add_executable(diff_vector_add_runner
@@ -157,6 +185,28 @@ add_test(
   NAME differential.vector_add
   COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/differential/run_all.py
           --runner $<TARGET_FILE:diff_vector_add_runner>
+          --cudart $<TARGET_FILE:cudart_shim>
+          --cuda $<TARGET_FILE:cuda_shim>
+          --core-dir $<TARGET_FILE_DIR:cudasim_core>
+)
+
+add_executable(demo_runner
+  kernels/demo_runner.cpp
+)
+target_compile_features(demo_runner PRIVATE cxx_std_20)
+target_include_directories(demo_runner PRIVATE ${CMAKE_SOURCE_DIR}/src)
+target_link_libraries(demo_runner PRIVATE cuda_shim)
+target_compile_definitions(demo_runner PRIVATE
+  COPY_PTX_PATH="${GENERATED_COPY_PTX}"
+  SAXPY_PTX_PATH="${GENERATED_SAXPY_PTX}"
+)
+cudasim_set_warnings(demo_runner)
+cudasim_apply_sanitizers(demo_runner)
+add_dependencies(demo_runner generate_copy_ptx generate_saxpy_ptx)
+add_test(
+  NAME kernels.demo_differential
+  COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/kernels/run_demos.py
+          --runner $<TARGET_FILE:demo_runner>
           --cudart $<TARGET_FILE:cudart_shim>
           --cuda $<TARGET_FILE:cuda_shim>
           --core-dir $<TARGET_FILE_DIR:cudasim_core>

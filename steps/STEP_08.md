@@ -50,6 +50,10 @@ pass within the configured tolerance.
 - files: `tests/CMakeLists.txt`
 - verification: `make test` passed all 18 tests.
 
+- Added a small demo kernel corpus (`saxpy` and `copy`), generated their PTX with `nvcc`, and added differential execution tests.
+- files: `tests/kernels/saxpy.cu`, `tests/kernels/copy.cu`, `tests/kernels/demo_runner.cpp`, `tests/kernels/run_demos.py`, `tests/CMakeLists.txt`, `src/exec/executor.cpp`
+- verification: `make test` passed all 19 tests.
+
 ## Verification
 
 Commands run:
@@ -61,7 +65,7 @@ make test
 Result:
 
 ```text
-100% tests passed, 0 tests failed out of 18
+100% tests passed, 0 tests failed out of 19
 ```
 
 ## Status
