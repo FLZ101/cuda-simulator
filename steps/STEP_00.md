@@ -40,12 +40,52 @@ The build must succeed with no simulator-specific CUDA functionality.
 
 ## Commits
 
-<!-- Record each commit here. -->
+- hash: `1b28c42`
+- subject: `Add step recording workflow and step 0 plan`
+- files: `AGENTS.md`, `steps/STEP_00.md`
+- notes: Added the agent workflow, step recording rules, and the initial Step 0 plan.
+
+- hash: `82122d4`
+- subject: `Create step 0 build and test skeleton`
+- files:
+  - `.gitignore`
+  - `CMakeLists.txt`
+  - `README.md`
+  - `cmake/CompilerWarnings.cmake`
+  - `cmake/FindLLVM.cmake`
+  - `cmake/SimulatorOptions.cmake`
+  - `src/CMakeLists.txt`
+  - `src/cli/CMakeLists.txt`
+  - `src/cli/main.cpp`
+  - `src/compat/CMakeLists.txt`
+  - `src/compat/cuda_shim.cpp`
+  - `src/compat/cudart_shim.cpp`
+  - `src/core/CMakeLists.txt`
+  - `src/core/version.cpp`
+  - `src/core/version.h`
+  - `src/core/version.h.in`
+  - `tests/CMakeLists.txt`
+  - `tests/smoke/vector_add_ref.cpp`
+- notes: Created C++20 CMake targets for the core library, two shim libraries, CLI runner, and smoke test. The smoke test and CLI runner build and run.
 
 ## Verification
 
-Not run yet.
+Commands run:
+
+```bash
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug -DCUDA_SIM_ENABLE_JIT=OFF -DCUDA_SIM_ENABLE_SANITIZERS=OFF
+cmake --build build -j
+ctest --test-dir build --output-on-failure
+./build/src/cli/cuda_sim_run
+```
+
+Result:
+
+```text
+100% tests passed, 0 tests failed out of 1
+cuda-simulator 0.1.0 jit=off
+```
 
 ## Status
 
-in progress
+complete
