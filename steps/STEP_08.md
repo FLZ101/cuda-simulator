@@ -54,6 +54,10 @@ pass within the configured tolerance.
 - files: `tests/kernels/saxpy.cu`, `tests/kernels/copy.cu`, `tests/kernels/demo_runner.cpp`, `tests/kernels/run_demos.py`, `tests/CMakeLists.txt`, `src/exec/executor.cpp`
 - verification: `make test` passed all 19 tests.
 
+- Added classical operator CUDA sources and PTX generation for naive matmul, tiled matmul, reduction, transpose, ReLU, and softmax.
+- files: `tests/kernels/*.cu`, `tests/CMakeLists.txt`
+- verification: `make test` passed and all generated PTX passed the SIMT gate.
+
 ## Verification
 
 Commands run:

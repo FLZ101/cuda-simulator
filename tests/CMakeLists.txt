@@ -23,6 +23,12 @@ set(GENERATED_SHARED_PTX ${GENERATED_PTX_DIR}/shared_memory.ptx)
 set(GENERATED_MULTI_WARP_PTX ${GENERATED_PTX_DIR}/multi_warp_barrier.ptx)
 set(GENERATED_SAXPY_PTX ${GENERATED_PTX_DIR}/saxpy.ptx)
 set(GENERATED_COPY_PTX ${GENERATED_PTX_DIR}/copy.ptx)
+set(GENERATED_MATMUL_NAIVE_PTX ${GENERATED_PTX_DIR}/matmul_naive.ptx)
+set(GENERATED_MATMUL_TILED_PTX ${GENERATED_PTX_DIR}/matmul_tiled.ptx)
+set(GENERATED_REDUCE_SUM_PTX ${GENERATED_PTX_DIR}/reduce_sum.ptx)
+set(GENERATED_TRANSPOSE_PTX ${GENERATED_PTX_DIR}/transpose.ptx)
+set(GENERATED_RELU_PTX ${GENERATED_PTX_DIR}/relu.ptx)
+set(GENERATED_SOFTMAX_PTX ${GENERATED_PTX_DIR}/softmax_row.ptx)
 
 add_custom_command(
   OUTPUT ${GENERATED_VECTOR_ADD_PTX}
@@ -78,6 +84,28 @@ add_custom_command(
   VERBATIM
 )
 add_custom_target(generate_copy_ptx DEPENDS ${GENERATED_COPY_PTX})
+
+foreach(kernel IN ITEMS
+    matmul_naive
+    matmul_tiled
+    reduce_sum
+    transpose
+    relu
+    softmax_row
+)
+  add_custom_command(
+    OUTPUT ${GENERATED_PTX_DIR}/${kernel}.ptx
+    COMMAND ${CMAKE_COMMAND} -E make_directory ${GENERATED_PTX_DIR}
+    COMMAND ${CUDAToolkit_NVCC_EXECUTABLE} -ptx -arch=compute_80
+            ${CMAKE_CURRENT_SOURCE_DIR}/kernels/${kernel}.cu
+            -o ${GENERATED_PTX_DIR}/${kernel}.ptx
+    DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/kernels/${kernel}.cu
+    VERBATIM
+  )
+  add_custom_target(generate_${kernel}_ptx ALL
+    DEPENDS ${GENERATED_PTX_DIR}/${kernel}.ptx
+  )
+endforeach()
 
 add_executable(ptx_parser_smoke
   ptx/parser_smoke.cpp
@@ -157,6 +185,12 @@ add_test(
           ${GENERATED_MULTI_WARP_PTX}
           ${GENERATED_SAXPY_PTX}
           ${GENERATED_COPY_PTX}
+          ${GENERATED_MATMUL_NAIVE_PTX}
+          ${GENERATED_MATMUL_TILED_PTX}
+          ${GENERATED_REDUCE_SUM_PTX}
+          ${GENERATED_TRANSPOSE_PTX}
+          ${GENERATED_RELU_PTX}
+          ${GENERATED_SOFTMAX_PTX}
 )
 
 add_test(
@@ -167,6 +201,12 @@ add_test(
           ${GENERATED_MULTI_WARP_PTX}
           ${GENERATED_SAXPY_PTX}
           ${GENERATED_COPY_PTX}
+          ${GENERATED_MATMUL_NAIVE_PTX}
+          ${GENERATED_MATMUL_TILED_PTX}
+          ${GENERATED_REDUCE_SUM_PTX}
+          ${GENERATED_TRANSPOSE_PTX}
+          ${GENERATED_RELU_PTX}
+          ${GENERATED_SOFTMAX_PTX}
 )
 
 add_executable(diff_vector_add_runner
