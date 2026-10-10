@@ -66,6 +66,10 @@ pass within the configured tolerance.
 - files: `tests/kernels/demo_runner.cpp`, `tests/kernels/run_demos.py`, `tests/CMakeLists.txt`
 - verification: `make test` passed all 19 tests.
 
+- Added an `operator_runner` and differential harness for the remaining classical operators. The test is currently disabled because `layer_norm` still exposes missing PTX execution semantics.
+- files: `tests/kernels/operator_runner.cpp`, `tests/kernels/run_operators.py`, `tests/CMakeLists.txt`, `src/exec/executor.cpp`
+- verification: `make test` is green; `kernels.operator_differential` is disabled pending PTX fixes.
+
 ## Verification
 
 Commands run:

@@ -262,6 +262,58 @@ add_test(
           --core-dir $<TARGET_FILE_DIR:cudasim_core>
 )
 
+add_executable(operator_runner
+  kernels/operator_runner.cpp
+)
+target_compile_features(operator_runner PRIVATE cxx_std_20)
+target_include_directories(operator_runner PRIVATE ${CMAKE_SOURCE_DIR}/src)
+target_link_libraries(operator_runner PRIVATE cuda_shim)
+target_compile_definitions(operator_runner PRIVATE
+  BIAS_ADD_PTX_PATH="${GENERATED_PTX_DIR}/bias_add.ptx"
+  BATCH_NORM_PTX_PATH="${GENERATED_PTX_DIR}/batch_norm.ptx"
+  MAX_POOL_PTX_PATH="${GENERATED_PTX_DIR}/max_pool2d.ptx"
+  AVG_POOL_PTX_PATH="${GENERATED_PTX_DIR}/avg_pool2d.ptx"
+  LAYER_NORM_PTX_PATH="${GENERATED_PTX_DIR}/layer_norm.ptx"
+  EMBEDDING_PTX_PATH="${GENERATED_PTX_DIR}/embedding_lookup.ptx"
+  TRANSPOSE_PTX_PATH="${GENERATED_PTX_DIR}/transpose.ptx"
+  MATMUL_NAIVE_PTX_PATH="${GENERATED_PTX_DIR}/matmul_naive.ptx"
+  MATMUL_TILED_PTX_PATH="${GENERATED_PTX_DIR}/matmul_tiled.ptx"
+  SOFTMAX_PTX_PATH="${GENERATED_PTX_DIR}/softmax_row.ptx"
+  REDUCE_SUM_PTX_PATH="${GENERATED_PTX_DIR}/reduce_sum.ptx"
+  CONV2D_NAIVE_PTX_PATH="${GENERATED_PTX_DIR}/conv2d_naive.ptx"
+  CONV2D_IM2COL_PTX_PATH="${GENERATED_PTX_DIR}/conv2d_im2col.ptx"
+  CONV2D_SHARED_PTX_PATH="${GENERATED_PTX_DIR}/conv2d_shared.ptx"
+  ATTENTION_PTX_PATH="${GENERATED_PTX_DIR}/attention_scores.ptx"
+)
+cudasim_set_warnings(operator_runner)
+cudasim_apply_sanitizers(operator_runner)
+add_dependencies(operator_runner
+  generate_bias_add_ptx
+  generate_batch_norm_ptx
+  generate_max_pool2d_ptx
+  generate_avg_pool2d_ptx
+  generate_layer_norm_ptx
+  generate_embedding_lookup_ptx
+  generate_transpose_ptx
+  generate_matmul_naive_ptx
+  generate_matmul_tiled_ptx
+  generate_softmax_row_ptx
+  generate_reduce_sum_ptx
+  generate_conv2d_naive_ptx
+  generate_conv2d_im2col_ptx
+  generate_conv2d_shared_ptx
+  generate_attention_scores_ptx
+)
+add_test(
+  NAME kernels.operator_differential
+  COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/kernels/run_operators.py
+          --runner $<TARGET_FILE:operator_runner>
+          --cudart $<TARGET_FILE:cudart_shim>
+          --cuda $<TARGET_FILE:cuda_shim>
+          --core-dir $<TARGET_FILE_DIR:cudasim_core>
+)
+set_tests_properties(kernels.operator_differential PROPERTIES DISABLED TRUE)
+
 add_executable(runtime_api_smoke
   compat/runtime_api_smoke.cpp
 )

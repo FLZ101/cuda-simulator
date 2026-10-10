@@ -8,6 +8,7 @@
 #include "ptx/token.h"
 
 #include <algorithm>
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
@@ -161,6 +162,65 @@ bool parse_predicate(const std::vector<cudasim::ptx::Token> &tokens,
   return negate ? !value : value;
 }
 
+std::optional<std::uint32_t>
+parse_u32_operand(const std::vector<cudasim::ptx::Token> &tokens,
+                  std::size_t &pos, const RegisterFile &registers,
+                  std::size_t lane) {
+  while (pos < tokens.size() &&
+         tokens[pos].kind == cudasim::ptx::TokenKind::Comma) {
+    ++pos;
+  }
+  if (pos >= tokens.size()) {
+    return std::nullopt;
+  }
+  bool negative = false;
+  if (tokens[pos].kind == cudasim::ptx::TokenKind::Minus) {
+    negative = true;
+    ++pos;
+  }
+  if (tokens[pos].kind == cudasim::ptx::TokenKind::Number) {
+    const std::uint32_t value =
+        static_cast<std::uint32_t>(std::stoul(tokens[pos].text));
+    ++pos;
+    return negative
+               ? static_cast<std::uint32_t>(-static_cast<std::int32_t>(value))
+               : value;
+  }
+  auto reg = parse_register(tokens, pos);
+  if (!reg) {
+    return std::nullopt;
+  }
+  return static_cast<std::uint32_t>(registers.values[reg->index][lane]);
+}
+
+std::optional<float>
+parse_f32_operand(const std::vector<cudasim::ptx::Token> &tokens,
+                  std::size_t &pos, const RegisterFile &registers,
+                  std::size_t lane) {
+  while (pos < tokens.size() &&
+         tokens[pos].kind == cudasim::ptx::TokenKind::Comma) {
+    ++pos;
+  }
+  if (pos >= tokens.size()) {
+    return std::nullopt;
+  }
+  if (tokens[pos].kind == cudasim::ptx::TokenKind::Number) {
+    const std::string text = tokens[pos].text;
+    ++pos;
+    if (text == "0f00000000") {
+      return 0.0F;
+    }
+    return std::stof(text);
+  }
+  auto reg = parse_register(tokens, pos);
+  if (!reg) {
+    return std::nullopt;
+  }
+  float value = 0.0F;
+  std::memcpy(&value, &registers.values[reg->index][lane], sizeof(value));
+  return value;
+}
+
 std::size_t
 find_label(const std::unordered_map<std::string, std::size_t> &labels,
            const std::string &label) {
@@ -207,12 +267,22 @@ bool coalesced_global_f32(const FlatInstruction &instruction,
     if (!address) {
       return false;
     }
+    std::size_t immediate = 0;
+    if (pos + 1 < instruction.operand_tokens.size() &&
+        instruction.operand_tokens[pos].kind == cudasim::ptx::TokenKind::Plus &&
+        instruction.operand_tokens[pos + 1].kind ==
+            cudasim::ptx::TokenKind::Number) {
+      ++pos;
+      immediate = static_cast<std::size_t>(
+          std::stoull(instruction.operand_tokens[pos].text));
+      ++pos;
+    }
 
     std::vector<const void *> addresses;
     addresses.reserve(lanes.size());
     for (const std::size_t lane : lanes) {
       addresses.push_back(reinterpret_cast<const void *>(
-          registers.values[address->index][lane]));
+          registers.values[address->index][lane] + immediate));
     }
 
     std::vector<std::uint32_t> values;
@@ -233,6 +303,16 @@ bool coalesced_global_f32(const FlatInstruction &instruction,
   }
   ++pos;
   auto address = parse_register(instruction.operand_tokens, pos);
+  std::size_t immediate = 0;
+  if (pos + 1 < instruction.operand_tokens.size() &&
+      instruction.operand_tokens[pos].kind == cudasim::ptx::TokenKind::Plus &&
+      instruction.operand_tokens[pos + 1].kind ==
+          cudasim::ptx::TokenKind::Number) {
+    ++pos;
+    immediate = static_cast<std::size_t>(
+        std::stoull(instruction.operand_tokens[pos].text));
+    ++pos;
+  }
   while (pos < instruction.operand_tokens.size() &&
          instruction.operand_tokens[pos].kind !=
              cudasim::ptx::TokenKind::Percent) {
@@ -248,8 +328,8 @@ bool coalesced_global_f32(const FlatInstruction &instruction,
   addresses.reserve(lanes.size());
   values.reserve(lanes.size());
   for (const std::size_t lane : lanes) {
-    addresses.push_back(
-        reinterpret_cast<void *>(registers.values[address->index][lane]));
+    addresses.push_back(reinterpret_cast<void *>(
+        registers.values[address->index][lane] + immediate));
     values.push_back(
         static_cast<std::uint32_t>(registers.values[value->index][lane]));
   }
@@ -833,6 +913,140 @@ bool execute_instruction(
               registers.values[address->index][lane]),
           static_cast<std::uint32_t>(registers.values[value->index][lane]));
     }
+    next_pc = pc + 1;
+    return true;
+  }
+
+  if (opcode == "mov.u64") {
+    std::size_t pos = 0;
+    auto dst = parse_register(instruction.operand_tokens, pos);
+    auto src = parse_register(instruction.operand_tokens, pos);
+    if (!dst || !src) {
+      return false;
+    }
+    registers.values[dst->index][lane] = registers.values[src->index][lane];
+    next_pc = pc + 1;
+    return true;
+  }
+
+  if (opcode == "mov.f32") {
+    std::size_t pos = 0;
+    auto dst = parse_register(instruction.operand_tokens, pos);
+    if (!dst) {
+      return false;
+    }
+    auto value =
+        parse_f32_operand(instruction.operand_tokens, pos, registers, lane);
+    if (!value) {
+      return false;
+    }
+    std::uint32_t bits = 0;
+    std::memcpy(&bits, &*value, sizeof(bits));
+    registers.values[dst->index][lane] = bits;
+    next_pc = pc + 1;
+    return true;
+  }
+
+  if (opcode == "add.s32" || opcode == "sub.s32" || opcode == "and.b32" ||
+      opcode == "mul.lo.s32") {
+    std::size_t pos = 0;
+    auto dst = parse_register(instruction.operand_tokens, pos);
+    auto a =
+        parse_u32_operand(instruction.operand_tokens, pos, registers, lane);
+    auto b =
+        parse_u32_operand(instruction.operand_tokens, pos, registers, lane);
+    if (!dst || !a || !b) {
+      return false;
+    }
+    std::uint32_t result = 0;
+    if (opcode == "add.s32") {
+      result = *a + *b;
+    } else if (opcode == "sub.s32") {
+      result = *a - *b;
+    } else if (opcode == "and.b32") {
+      result = *a & *b;
+    } else {
+      result = *a * *b;
+    }
+    registers.values[dst->index][lane] = result;
+    next_pc = pc + 1;
+    return true;
+  }
+
+  if (opcode == "setp.lt.s32" || opcode == "setp.lt.u32" ||
+      opcode == "setp.eq.s32") {
+    std::size_t pos = 0;
+    if (pos >= instruction.operand_tokens.size() ||
+        instruction.operand_tokens[pos].kind !=
+            cudasim::ptx::TokenKind::Percent) {
+      return false;
+    }
+    ++pos;
+    const std::string pred_name = instruction.operand_tokens[pos++].text;
+    std::size_t pred_index = 0;
+    for (std::size_t i = 1; i < pred_name.size(); ++i) {
+      pred_index =
+          pred_index * 10 + static_cast<std::size_t>(pred_name[i] - '0');
+    }
+    auto a =
+        parse_u32_operand(instruction.operand_tokens, pos, registers, lane);
+    auto b =
+        parse_u32_operand(instruction.operand_tokens, pos, registers, lane);
+    if (!a || !b || pred_index >= registers.predicates.size()) {
+      return false;
+    }
+    if (opcode == "setp.eq.s32") {
+      registers.predicates[pred_index][lane] = *a == *b;
+    } else if (opcode == "setp.lt.s32") {
+      registers.predicates[pred_index][lane] =
+          static_cast<std::int32_t>(*a) < static_cast<std::int32_t>(*b);
+    } else {
+      registers.predicates[pred_index][lane] = *a < *b;
+    }
+    next_pc = pc + 1;
+    return true;
+  }
+
+  if (opcode == "cvt.rn.f32.s32") {
+    std::size_t pos = 0;
+    auto dst = parse_register(instruction.operand_tokens, pos);
+    auto src =
+        parse_u32_operand(instruction.operand_tokens, pos, registers, lane);
+    if (!dst || !src) {
+      return false;
+    }
+    const float value = static_cast<float>(static_cast<std::int32_t>(*src));
+    std::uint32_t bits = 0;
+    std::memcpy(&bits, &value, sizeof(bits));
+    registers.values[dst->index][lane] = bits;
+    next_pc = pc + 1;
+    return true;
+  }
+
+  if (opcode == "div.rn.f32" || opcode == "sub.f32" ||
+      opcode == "sqrt.rn.f32") {
+    std::size_t pos = 0;
+    auto dst = parse_register(instruction.operand_tokens, pos);
+    auto a =
+        parse_f32_operand(instruction.operand_tokens, pos, registers, lane);
+    std::optional<float> b;
+    if (opcode != "sqrt.rn.f32") {
+      b = parse_f32_operand(instruction.operand_tokens, pos, registers, lane);
+    }
+    if (!dst || !a || (opcode != "sqrt.rn.f32" && !b)) {
+      return false;
+    }
+    float result = 0.0F;
+    if (opcode == "div.rn.f32") {
+      result = *a / *b;
+    } else if (opcode == "sub.f32") {
+      result = *a - *b;
+    } else {
+      result = std::sqrt(*a);
+    }
+    std::uint32_t bits = 0;
+    std::memcpy(&bits, &result, sizeof(bits));
+    registers.values[dst->index][lane] = bits;
     next_pc = pc + 1;
     return true;
   }

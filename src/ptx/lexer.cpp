@@ -36,6 +36,25 @@ Token Lexer::next() {
     return make_token(TokenKind::Newline, token_line, token_column, "\n");
   }
 
+  if (ch == '"') {
+    std::string text;
+    text.push_back(ch);
+    ++pos_;
+    ++column_;
+    while (pos_ < source_.size() && source_[pos_] != '"' &&
+           source_[pos_] != '\n') {
+      text.push_back(source_[pos_]);
+      ++pos_;
+      ++column_;
+    }
+    if (pos_ < source_.size() && source_[pos_] == '"') {
+      text.push_back(source_[pos_]);
+      ++pos_;
+      ++column_;
+    }
+    return make_token(TokenKind::String, token_line, token_column, text);
+  }
+
   if (std::isalpha(static_cast<unsigned char>(ch)) || ch == '_') {
     std::string text;
     while (pos_ < source_.size() &&

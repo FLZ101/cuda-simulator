@@ -7,6 +7,7 @@ namespace cudasim::ptx {
 enum class TokenKind {
   Identifier,
   Number,
+  String,
   Percent,
   Dollar,
   At,
