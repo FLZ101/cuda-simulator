@@ -6,10 +6,11 @@ CTEST ?= ctest
 
 CMAKE_FLAGS := \
 	-DCMAKE_BUILD_TYPE=$(CMAKE_BUILD_TYPE) \
+	-DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
 	-DCUDA_SIM_ENABLE_JIT=OFF \
 	-DCUDA_SIM_ENABLE_SANITIZERS=OFF
 
-.PHONY: all build configure test run clean help install-hooks format
+.PHONY: all build configure test run clean help install-hooks format compile_commands
 
 all: build
 
@@ -18,6 +19,9 @@ build: configure
 
 configure:
 	$(CMAKE) -S . -B $(BUILD_DIR) -G Ninja $(CMAKE_FLAGS)
+
+compile_commands: configure
+	ln -sfn $(BUILD_DIR)/compile_commands.json compile_commands.json
 
 test: build
 	$(CTEST) --test-dir $(BUILD_DIR) --output-on-failure
@@ -39,6 +43,7 @@ help:
 	@echo "  make build      Configure with Ninja and build"
 	@echo "  make test       Build and run CTest"
 	@echo "  make run        Build and run the CLI smoke executable"
+	@echo "  make compile_commands  Generate root compile_commands.json"
 	@echo "  make install-hooks  Configure Git to use .githooks"
 	@echo "  make format     Format C++ sources with clang-format"
 	@echo "  make clean      Remove the build directory"
