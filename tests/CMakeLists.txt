@@ -33,3 +33,22 @@ add_test(
           $<TARGET_FILE:cudart_shim>
           $<TARGET_FILE:cuda_shim>
 )
+
+if(CUDAToolkit_FOUND)
+  add_executable(nvcc_smoke
+    compat/nvcc_smoke.cu
+  )
+  set_target_properties(nvcc_smoke PROPERTIES
+    CUDA_STANDARD 20
+    CUDA_STANDARD_REQUIRED ON
+    CUDA_ARCHITECTURES 80
+  )
+  add_test(
+    NAME compat.nvcc_smoke
+    COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/compat/run_nvcc_smoke.sh
+            $<TARGET_FILE:nvcc_smoke>
+            $<TARGET_FILE:cudart_shim>
+            $<TARGET_FILE:cuda_shim>
+            $<TARGET_FILE_DIR:cudasim_core>
+  )
+endif()

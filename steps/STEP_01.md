@@ -62,6 +62,10 @@ device memory, and complete without loading a real CUDA driver.
 - files: `tests/compat/runtime_api_smoke.cpp`, `tests/compat/driver_api_smoke.cpp`, `tests/compat/check_symbols.sh`, `tests/CMakeLists.txt`
 - verification: `make format && make test` passed all 4 tests.
 
+- Added CUDA toolkit detection and an actual `nvcc`-compiled runtime smoke test that runs under `LD_PRELOAD`.
+- files: `CMakeLists.txt`, `tests/compat/nvcc_smoke.cu`, `tests/compat/run_nvcc_smoke.sh`, `tests/CMakeLists.txt`
+- verification: `make test` passed all 5 tests.
+
 ## Verification
 
 Commands run:
@@ -74,12 +78,11 @@ make test
 Result:
 
 ```text
-100% tests passed, 0 tests failed out of 4
+100% tests passed, 0 tests failed out of 5
 ```
 
-`nvcc` is not installed in the current environment, so the generated-program
-check was replaced by standalone C++ smoke tests that link directly to the
-shim libraries.
+The CUDA toolkit was found at `/usr/local/cuda`, and the `nvcc`-compiled smoke
+test passes through `LD_PRELOAD`.
 
 ## Status
 
