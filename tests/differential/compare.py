@@ -34,8 +34,7 @@ def main():
         return 2
     actual = read_floats(sys.argv[1])
     expected = read_floats(sys.argv[2])
-    ok, message = compare_float_lists(actual, expected, float(sys.argv[3]),
-                                      float(sys.argv[4]))
+    ok, message = compare_float_lists(actual, expected, float(sys.argv[3]), float(sys.argv[4]))
     print(message)
     return 0 if ok else 1
 

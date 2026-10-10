@@ -1,9 +1,11 @@
 build/
 .cache/
+.venv/
 compile_commands.json
 *.o
 *.so
 *.a
 *.d
+*.egg-info/
 __pycache__/
 *.pyc

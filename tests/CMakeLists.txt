@@ -212,27 +212,6 @@ add_test(
           ${ALL_GENERATED_PTX}
 )
 
-add_executable(diff_vector_add_runner
-  differential/fixtures/vector_add/host_runner.cpp
-)
-target_compile_features(diff_vector_add_runner PRIVATE cxx_std_20)
-target_include_directories(diff_vector_add_runner PRIVATE ${CMAKE_SOURCE_DIR}/src)
-target_link_libraries(diff_vector_add_runner PRIVATE cuda_shim)
-target_compile_definitions(diff_vector_add_runner PRIVATE
-  PTX_FIXTURE_PATH="${GENERATED_VECTOR_ADD_PTX}"
-)
-cudasim_set_warnings(diff_vector_add_runner)
-cudasim_apply_sanitizers(diff_vector_add_runner)
-add_dependencies(diff_vector_add_runner generate_test_ptx)
-add_test(
-  NAME differential.vector_add
-  COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/differential/run_all.py
-          --runner $<TARGET_FILE:diff_vector_add_runner>
-          --cudart $<TARGET_FILE:cudart_shim>
-          --cuda $<TARGET_FILE:cuda_shim>
-          --core-dir $<TARGET_FILE_DIR:cudasim_core>
-)
-
 add_executable(demo_runner
   kernels/demo_runner.cpp
 )

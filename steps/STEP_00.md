@@ -44,7 +44,7 @@ The build must succeed with no simulator-specific CUDA functionality.
 - files: `AGENTS.md`, `steps/STEP_00.md`
 - verification: No build or test required.
 
-- Created the C++20 CMake project, core library, two shim libraries, CLI runner, generated version header, and vector-add smoke test.
+- Created the C++20 CMake project, core library, two shim libraries, CLI runner, generated version header, and an early-stage vector-add host CPU reference smoke test.
 - files:
   - `.gitignore`
   - `CMakeLists.txt`

@@ -4,7 +4,8 @@
 
 This repository contains a CPU-hosted simulator for small, externally
 generated CUDA programs. The simulator loads PTX and executes SIMT kernels on
-the host CPU without an NVIDIA GPU.
+the host CPU. A CUDA-capable GPU is required to run `nvcc`-compiled CUDA
+programs as golden references during differential verification.
 
 The v1 end-to-end targets are:
 
@@ -34,14 +35,16 @@ adding a plan.
 - `cp.async` may be supported only as a synchronous copy emulation.
 - Run standalone generated host programs, not a full Python process.
 - Keep v1 simple: one device, one primary context, dynamic CUDA runtime.
+- Host CPU references are allowed only in early-stage smoke/execution tests
+  such as the vector-add smoke test. The Step 8 differential harness must use
+  the real GPU for `nvcc` programs; do not add a host CPU reference path there.
 
 ## Current state
 
 - `DESIGN.md` exists and is the source of truth.
-- No implementation code exists yet.
 - The implementation order is defined in `DESIGN.md`, Section 11.
-- CUDA toolkit or an external generator is required to create CUDA test
-  programs. A GPU is not required to generate PTX.
+- CUDA toolkit and a CUDA-capable GPU are required to create and verify CUDA
+  test programs.
 
 ## Workflow
 

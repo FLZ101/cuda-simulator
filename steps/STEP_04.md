@@ -36,8 +36,7 @@ tests/ptx/vector_add_exec_smoke.cpp
 make test
 ```
 
-The generated vector-add kernel must compute the same result as the CPU
-reference.
+The generated vector-add kernel must compute the expected vector sum.
 
 ## Work Log
 

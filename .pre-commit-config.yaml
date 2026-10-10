@@ -7,3 +7,8 @@ repos:
         language: system
         types_or: [c++, c]
         args: ["-i"]
+      - id: black
+        name: black
+        entry: .venv/bin/black
+        language: system
+        types: [python]

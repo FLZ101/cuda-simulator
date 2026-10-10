@@ -33,7 +33,7 @@ make test
 ```
 
 Generated microkernels using branches, shared memory, and barriers must match
-reference results.
+the expected results.
 
 ## Work Log
 

@@ -3,7 +3,7 @@
 ## 1. Purpose
 
 Build a CPU-hosted simulator that runs small, externally generated CUDA
-programs without an NVIDIA GPU.
+programs.
 
 The simulator is not a model runtime. It intercepts CUDA runtime and driver
 calls, loads PTX, and executes kernels on the host CPU.
@@ -44,7 +44,9 @@ Host assumptions:
 - CUDA toolkit or another external generator is required to produce the CUDA
   programs under test. It is a generation dependency, not a simulator runtime
   dependency.
-- A GPU is not required for generation; `nvcc` can emit PTX without a GPU.
+- A CUDA-capable GPU is required for differential verification of
+  `nvcc`-generated programs. Early-stage smoke/execution tests may use host
+  CPU references; the Step 8 differential harness does not.
 
 ## 3. How a Program Runs
 
@@ -607,6 +609,17 @@ For a fatbin, extract PTX first with `cuobjdump --dump-ptx`.
 
 Each step ends with a concrete verification target.
 
+Current status:
+
+- Steps 0 through 8 are implemented and recorded in `steps/STEP_00.md` through
+  `steps/STEP_08.md`.
+- Step 8's operator execution qualification portion is in progress.
+- The current blocker is `kernels.operator_differential`: `operator_runner`
+  links directly to `libcuda_shim`, so its unshimmed "GPU" run is still the
+  simulator. Replace it with an `nvcc`-compiled GPU reference runner that
+  dispatches by kernel name, then add the remaining missing PTX execution
+  semantics one operator at a time.
+
 ### Step 0: Build and Test Skeleton
 
 Create:
@@ -773,7 +786,8 @@ Test sizes:
 ```
 
 Exit: the generated vector-add program runs under `LD_PRELOAD` and matches the
-real GPU golden output.
+early-stage host CPU reference. Later generated programs switch to the real
+GPU reference in Step 8.
 
 ### Step 5: Full Execution Semantics
 
@@ -864,49 +878,24 @@ Run the tensor-core PTX gate from Section 10 in CI.
 
 Exit: each target operator has at least one generated kernel that passes.
 
-### Step 8: Differential Test Harness
+### Step 8: Differential Test Harness and Operator Qualification
 
-Create fixture directories, not bare PTX files:
-
-```text
-tests/fixtures/<operator>/
-  manifest.json
-  kernel.ptx
-  host_runner
-```
-
-`manifest.json` records:
-
-- input/output shape and dtype
-- reference function
-- launch metadata
-- tolerances
-- generation command
-
-Harness behavior:
-
-1. Run generated host program under `LD_PRELOAD`.
-2. Produce the golden output:
-   - on the real GPU for `nvcc`-compiled CUDA programs
-   - with PyTorch CPU inference for PyTorch-generated model runners
-3. Compare tensors.
-4. Report max absolute/relative error.
-
-Tolerances:
+Reference selection:
 
 ```text
-FP32: rtol = 1e-4, atol = 1e-5
-FP16/BF16: rtol = 5e-2, atol = 1e-2
-integer: exact
+nvcc-compiled CUDA program       -> real GPU reference
+PyTorch-generated model runner   -> PyTorch CPU reference
 ```
 
-### Step 8.5: Operator Execution Qualification Gate
+Step 8 does not use a host CPU reference. Early-stage smoke/execution tests
+remain outside this differential harness.
 
-Before ResNet or GPT-2 integration, every generated operator kernel must be
-executed through the simulator and compared with the correct reference for its
-producer. PTX generation and SIMT-gate checks are not sufficient.
+Before ResNet or GPT-2 integration, every generated operator
+kernel must be executed through the simulator and compared with the correct
+reference for its producer. PTX generation and SIMT-gate checks are not
+sufficient.
 
-When a CUDA-capable GPU is available, use it as the primary golden oracle:
+For `nvcc` operators:
 
 1. Run the generated host runner without simulator shims on the real GPU.
 2. Store the GPU output as the golden reference.
@@ -930,14 +919,13 @@ gpu_reference_runner --kernel matmul_naive \
 This keeps GPU and simulator invocation symmetric and avoids maintaining one
 separate runner per operator.
 
-Reference selection:
+Tolerances:
 
 ```text
-nvcc-compiled CUDA program -> real GPU reference
-PyTorch-generated model runner -> PyTorch CPU reference
+FP32: rtol = 1e-4, atol = 1e-5
+FP16/BF16: rtol = 5e-2, atol = 1e-2
+integer: exact
 ```
-
-The real GPU is still required for this project.
 
 ### GPU reference flow for `nvcc` programs
 
@@ -980,18 +968,26 @@ Details:
 - The comparison checks tensor values and reports max absolute/relative error.
 - The same random seed and deterministic input must be used for both runs.
 
-### PyTorch CPU reference flow for model-generated runners
+### PyTorch CPU reference flow for PyTorch-generated runners
+
+Step 8 uses this path only for simple PyTorch-generated models with one or a
+few operators, such as matmul, conv, or MLP. It is not used for hand-written
+`nvcc` operator kernels. The same mechanism is reused later for full
+ResNet/GPT-2 models in Steps 9 and 10.
 
 Steps:
 
-1. Export or trace the model:
+1. Export or trace a deterministic model. For simple operators, use a minimal
+   model such as `nn.Linear`, `nn.Conv2d`, or a small `nn.Sequential`:
 
    ```python
    model.eval()
    torch.manual_seed(1234)
-   example_input = torch.randn(1, 3, 224, 224)
+   example_input = torch.randn(4, 16)
    traced = torch.jit.trace(model, example_input)
    ```
+
+   Full ResNet/GPT-2 reference export belongs to Steps 9 and 10, not Step 8.
 
 2. Run the model on CPU to produce the reference:
 
@@ -1001,11 +997,35 @@ Steps:
    torch.save(reference, "reference.pt")
    ```
 
-3. Generate a host runner from the same PyTorch model or traced graph:
+3. Generate `model_runner` from the same traced graph. The target pipeline is:
 
    ```text
-   PyTorch/TorchInductor/Triton -> CUDA host runner + PTX
+   traced PyTorch graph
+         |
+         v
+   TorchInductor lowers each operator to Triton SIMT kernels
+         |
+         v
+   Triton emits CUDA source/PTX for those kernels
+         |
+         v
+   a small host wrapper loads the PTX and launches the kernels
+         |
+         v
+   nvcc links the wrapper into ./model_runner
    ```
+
+   The wrapper contract is:
+
+   - `--input input.raw`
+   - `--output output.raw`
+   - allocate device memory and copy inputs
+   - launch all generated kernels in graph order
+   - copy final output back to host
+
+   The generated runner must embed or load PTX only, never CUBIN/SASS. Tensor
+   cores are disallowed, so TorchInductor/Triton must use the SIMT path and the
+   generated PTX must pass the tensor-core gate.
 
 4. Run the generated host runner through the simulator:
 
@@ -1024,7 +1044,9 @@ Steps:
 
 Details:
 
-- The PyTorch CPU reference is used for model-level validation.
+- The PyTorch CPU reference validates simple PyTorch-generated models with one
+  or a few operators in Step 8. The same mechanism is reused later for full
+  ResNet/GPT-2 models.
 - The generated host runner and the PyTorch CPU reference must use identical
   weights, input tensors, and evaluation mode.
 - For stochastic operations, fix seeds and use greedy/deterministic paths.
@@ -1053,41 +1075,13 @@ Qualification target matrix:
 | batch norm | `B,C,H,W` | GPU for nvcc / PyTorch CPU for model | tensor |
 | GELU | `N` | GPU for nvcc / PyTorch CPU for model | tensor |
 
-For each operator:
+For each operator in the matrix:
 
-1. Create a fixture directory:
-
-   ```text
-   tests/differential/fixtures/<operator>/
-     host_runner
-     input.raw
-     reference.raw
-     manifest.json
-   ```
-
-2. Create or extend a host runner that:
-
-   - reads deterministic input files
-   - loads the generated PTX through `cuModuleLoadData`
-   - launches the kernel through `cuLaunchKernel`
-   - writes output files
-
-3. Add a Python reference function.
-
-4. Run:
-
-   ```bash
-   LD_PRELOAD=<libcudart_shim>:<libcuda_shim> ./host_runner
-   ```
-
-5. Compare:
-
-   ```bash
-   python3 tests/differential/run_all.py \
-     --fixture <operator> \
-     --runner ./host_runner
-   ```
-
+1. Add its kernel and argument parser to the single `gpu_reference_runner`.
+2. Generate deterministic inputs from the operator's shape and dtype.
+3. Run the GPU reference runner without shims to produce the golden output.
+4. Run the same runner with simulator shims to produce the simulator output.
+5. Compare with the configured tolerance.
 6. If the executor reports an unsupported PTX instruction:
 
    - add the minimal opcode/type support
@@ -1272,22 +1266,29 @@ model end-to-end tests passing
 Bottom-up:
 
 1. Component tests for shims, memory, streams, events, and PTX parsing.
-2. Kernel differential tests against the producer-appropriate golden output.
+2. Kernel differential tests against the maturity-appropriate reference:
+   - `nvcc` kernels: real GPU reference
+   - PyTorch-generated models: PyTorch CPU reference
 3. Operator tests for Conv2d, GEMM, elementwise, reduction, softmax, layer
    norm, and attention.
 4. End-to-end ResNet and GPT-2 tests.
 5. Runtime trace tests comparing kernel launch order and copy sizes.
 
-## 13. Project Structure
+## 13. Target Project Layout
 
 ```text
 cuda-simulator/
   CMakeLists.txt
   DESIGN.md
   src/
+    cli/
+      main.cpp
     compat/
       cudart_shim.cpp
       cuda_shim.cpp
+    core/
+      compat_state.cpp
+      version.cpp
     loader/
       elf.cpp
       fatbin.cpp
@@ -1319,11 +1320,14 @@ cuda-simulator/
       llvm_backend.cpp
       function_cache.cpp
   tests/
+    compat/
+    differential/
     generated/
     kernels/
+    mem/
     models/
-    differential/
-    fixtures/
+    ptx/
+    smoke/
 ```
 
 ## 14. Key Risks

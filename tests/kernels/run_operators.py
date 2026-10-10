@@ -42,12 +42,8 @@ def main():
         def run_pair(mode, make_args):
             gpu_out = os.path.join(tmp, f"{mode}_gpu.bin")
             sim_out = os.path.join(tmp, f"{mode}_sim.bin")
-            subprocess.run(
-                [args.runner, mode, *make_args(gpu_out)], check=True, env=gpu_env
-            )
-            subprocess.run(
-                [args.runner, mode, *make_args(sim_out)], check=True, env=sim_env
-            )
+            subprocess.run([args.runner, mode, *make_args(gpu_out)], check=True, env=gpu_env)
+            subprocess.run([args.runner, mode, *make_args(sim_out)], check=True, env=sim_env)
             gpu = read_floats(gpu_out)
             sim = read_floats(sim_out)
             assert len(gpu) == len(sim), f"{mode} length mismatch"
