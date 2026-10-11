@@ -76,6 +76,11 @@ set(CLASSIC_KERNEL_NAMES
   minimum
   maximum
   leaky_relu
+  abs
+  relu6
+  softplus
+  swiglu
+  elu
 )
 
 add_custom_command(
@@ -298,6 +303,11 @@ target_compile_definitions(gpu_reference_runner PRIVATE
   MINIMUM_PTX_PATH="${GENERATED_PTX_DIR}/minimum.ptx"
   MAXIMUM_PTX_PATH="${GENERATED_PTX_DIR}/maximum.ptx"
   LEAKY_RELU_PTX_PATH="${GENERATED_PTX_DIR}/leaky_relu.ptx"
+  ABS_PTX_PATH="${GENERATED_PTX_DIR}/abs.ptx"
+  RELU6_PTX_PATH="${GENERATED_PTX_DIR}/relu6.ptx"
+  SOFTPLUS_PTX_PATH="${GENERATED_PTX_DIR}/softplus.ptx"
+  SWIGLU_PTX_PATH="${GENERATED_PTX_DIR}/swiglu.ptx"
+  ELU_PTX_PATH="${GENERATED_PTX_DIR}/elu.ptx"
 )
 add_dependencies(gpu_reference_runner
   generate_bias_add_ptx
@@ -347,6 +357,11 @@ add_dependencies(gpu_reference_runner
   generate_minimum_ptx
   generate_maximum_ptx
   generate_leaky_relu_ptx
+  generate_abs_ptx
+  generate_relu6_ptx
+  generate_softplus_ptx
+  generate_swiglu_ptx
+  generate_elu_ptx
 )
 add_test(
   NAME kernels.gpu_reference_differential

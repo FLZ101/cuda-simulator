@@ -927,7 +927,8 @@ int main(int argc, char **argv) {
 
   if (mode == "sigmoid" || mode == "tanh" || mode == "silu" ||
       mode == "reciprocal" || mode == "exp" || mode == "log" ||
-      mode == "sqrt" || mode == "rsqrt") {
+      mode == "sqrt" || mode == "rsqrt" || mode == "abs" || mode == "relu6" ||
+      mode == "softplus") {
     if (argc != 5) {
       return 59;
     }
@@ -962,6 +963,15 @@ int main(int argc, char **argv) {
     } else if (mode == "rsqrt") {
       ptx = RSQRT_PTX_PATH;
       name = "rsqrt_kernel";
+    } else if (mode == "abs") {
+      ptx = ABS_PTX_PATH;
+      name = "abs_kernel";
+    } else if (mode == "relu6") {
+      ptx = RELU6_PTX_PATH;
+      name = "relu6";
+    } else if (mode == "softplus") {
+      ptx = SOFTPLUS_PTX_PATH;
+      name = "softplus";
     } else {
       ptx = RECIPROCAL_PTX_PATH;
       name = "reciprocal";
@@ -1044,6 +1054,54 @@ int main(int argc, char **argv) {
     CUfunction f = load_function(LEAKY_RELU_PTX_PATH, "leaky_relu");
     if (!f || !launch_1d(f, params, n)) {
       return 66;
+    }
+    std::vector<float> output(input.size());
+    cuMemcpyDtoH(output.data(), d_out, bytes);
+    write_floats(out_path, output);
+    return 0;
+  }
+
+  if (mode == "swiglu") {
+    if (argc != 6) {
+      return 67;
+    }
+    auto a = read_floats(argv[2]);
+    auto b = read_floats(argv[3]);
+    const int n = std::stoi(argv[4]);
+    const std::size_t bytes = a.size() * sizeof(float);
+    CUdeviceptr d_a = alloc_copy(a.data(), bytes);
+    CUdeviceptr d_b = alloc_copy(b.data(), b.size() * sizeof(float));
+    CUdeviceptr d_out = 0;
+    cuMemAlloc(&d_out, bytes);
+    int count = n;
+    std::vector<void *> params = {&d_a, &d_b, &d_out, &count};
+    CUfunction f = load_function(SWIGLU_PTX_PATH, "swiglu");
+    if (!f || !launch_1d(f, params, n)) {
+      return 68;
+    }
+    std::vector<float> output(a.size());
+    cuMemcpyDtoH(output.data(), d_out, bytes);
+    write_floats(out_path, output);
+    return 0;
+  }
+
+  if (mode == "elu") {
+    if (argc != 6) {
+      return 69;
+    }
+    auto input = read_floats(argv[2]);
+    const float alpha = std::stof(argv[3]);
+    const int n = std::stoi(argv[4]);
+    const std::size_t bytes = input.size() * sizeof(float);
+    CUdeviceptr d_in = alloc_copy(input.data(), bytes);
+    CUdeviceptr d_out = 0;
+    cuMemAlloc(&d_out, bytes);
+    int count = n;
+    float a = alpha;
+    std::vector<void *> params = {&d_in, &d_out, &a, &count};
+    CUfunction f = load_function(ELU_PTX_PATH, "elu");
+    if (!f || !launch_1d(f, params, n)) {
+      return 70;
     }
     std::vector<float> output(input.size());
     cuMemcpyDtoH(output.data(), d_out, bytes);

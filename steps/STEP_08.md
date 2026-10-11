@@ -373,6 +373,14 @@ Comparison requirements:
   `tests/reference/run_gpu_reference.py`, `tests/CMakeLists.txt`
 - verification: `make test` is green with all 18 tests passing.
 
+- Added `abs`, `relu6`, `softplus`, `swiglu`, and `elu` kernels to the
+  real-GPU operator harness.
+- files: `tests/kernels/abs.cu`, `tests/kernels/relu6.cu`,
+  `tests/kernels/softplus.cu`, `tests/kernels/swiglu.cu`,
+  `tests/kernels/elu.cu`, `tests/reference/gpu_reference_runner.cu`,
+  `tests/reference/run_gpu_reference.py`, `tests/CMakeLists.txt`
+- verification: `make test` is green with all 18 tests passing.
+
 ## Verification
 
 Commands run:
