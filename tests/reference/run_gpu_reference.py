@@ -95,6 +95,12 @@ SUPPORTED_OPERATORS = {
     "upsample_nearest2d",
     "depthwise_conv2d",
     "repeat_kv",
+    "channel_shuffle",
+    "pixel_shuffle",
+    "adaptive_avg_pool2d",
+    "local_response_norm",
+    "fused_add_norm",
+    "cumsum",
 }
 
 
@@ -178,6 +184,12 @@ def main():
         causal = [float(i) for i in range(16)]
         causal_path = os.path.join(tmp, "causal.bin")
         write_floats(causal_path, causal)
+        fused_residual = [float((i % 3) - 1) for i in range(16)]
+        fused_residual_path = os.path.join(tmp, "fused_residual.bin")
+        write_floats(fused_residual_path, fused_residual)
+        cumsum_input = [float((i * 3) % 11) for i in range(16)]
+        cumsum_path = os.path.join(tmp, "cumsum.bin")
+        write_floats(cumsum_path, cumsum_input)
         targets = [0, 1]
         targets_path = os.path.join(tmp, "targets.bin")
         write_ints(targets_path, targets)
@@ -286,6 +298,30 @@ def main():
         run_pair(
             "repeat_kv",
             lambda out: [kv_path, "1", "2", "4", "4", "4", out],
+        )
+        run_pair(
+            "channel_shuffle",
+            lambda out: [cnn_in_path, "4", "2", "8", out],
+        )
+        run_pair(
+            "pixel_shuffle",
+            lambda out: [cnn_in_path, "4", "2", "2", "2", out],
+        )
+        run_pair(
+            "adaptive_avg_pool2d",
+            lambda out: [cnn_in_path, "4", "4", "2", "2", "1", out],
+        )
+        run_pair(
+            "local_response_norm",
+            lambda out: [cnn_in_path, "4", "8", "3", "1e-4", "0.75", "1.0", out],
+        )
+        run_pair(
+            "fused_add_norm",
+            lambda out: [cnn_in_path, fused_residual_path, "2", "8", "1e-5", out],
+        )
+        run_pair(
+            "cumsum",
+            lambda out: [cumsum_path, "2", "8", out],
         )
         bias = [0.1, -0.2, 0.3, 0.4]
         bias_path = os.path.join(tmp, "bias.bin")

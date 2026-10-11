@@ -1430,6 +1430,23 @@ bool execute_instruction(
     return true;
   }
 
+  if (opcode == "neg.s32" || opcode == "not.b32") {
+    std::size_t pos = 0;
+    auto dst = parse_register(instruction.operand_tokens, pos);
+    auto a =
+        parse_u32_operand(instruction.operand_tokens, pos, registers, lane);
+    if (!dst || !a) {
+      return false;
+    }
+    const std::uint32_t result =
+        opcode == "neg.s32"
+            ? static_cast<std::uint32_t>(-static_cast<std::int32_t>(*a))
+            : ~*a;
+    registers.values[dst->index][lane] = result;
+    next_pc = pc + 1;
+    return true;
+  }
+
   if (opcode == "add.s32" || opcode == "sub.s32" || opcode == "and.b32" ||
       opcode == "or.b32" || opcode == "xor.b32" || opcode == "mul.lo.s32" ||
       opcode == "div.s32" || opcode == "rem.s32" || opcode == "max.s32" ||

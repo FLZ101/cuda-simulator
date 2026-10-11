@@ -406,6 +406,19 @@ Comparison requirements:
   `tests/reference/run_gpu_reference.py`, `tests/CMakeLists.txt`
 - verification: `make test` is green with all 18 tests passing.
 
+- Added more CNN/LLM operators: `channel_shuffle`, `pixel_shuffle`,
+  `adaptive_avg_pool2d`, `local_response_norm`, `fused_add_norm`, and
+  `cumsum`. Added executor semantics for `neg.s32` and `not.b32`.
+- files: `tests/kernels/channel_shuffle.cu`,
+  `tests/kernels/pixel_shuffle.cu`,
+  `tests/kernels/adaptive_avg_pool2d.cu`,
+  `tests/kernels/local_response_norm.cu`,
+  `tests/kernels/fused_add_norm.cu`, `tests/kernels/cumsum.cu`,
+  `src/exec/executor.cpp`, `tests/reference/gpu_reference_runner.cu`,
+  `tests/reference/run_gpu_reference.py`, `tests/CMakeLists.txt`
+- verification: `cmake --build build -j 4` and `ctest --test-dir build`
+  are green; `kernels.gpu_reference_differential` passes with all 18 tests.
+
 ## Verification
 
 Commands run:

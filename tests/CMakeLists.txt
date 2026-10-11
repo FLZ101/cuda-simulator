@@ -114,6 +114,12 @@ set(CLASSIC_KERNEL_NAMES
   upsample_nearest2d
   depthwise_conv2d
   repeat_kv
+  channel_shuffle
+  pixel_shuffle
+  adaptive_avg_pool2d
+  local_response_norm
+  fused_add_norm
+  cumsum
 )
 
 add_custom_command(
@@ -374,6 +380,12 @@ target_compile_definitions(gpu_reference_runner PRIVATE
   UPSAMPLE_NEAREST2D_PTX_PATH="${GENERATED_PTX_DIR}/upsample_nearest2d.ptx"
   DEPTHWISE_CONV2D_PTX_PATH="${GENERATED_PTX_DIR}/depthwise_conv2d.ptx"
   REPEAT_KV_PTX_PATH="${GENERATED_PTX_DIR}/repeat_kv.ptx"
+  CHANNEL_SHUFFLE_PTX_PATH="${GENERATED_PTX_DIR}/channel_shuffle.ptx"
+  PIXEL_SHUFFLE_PTX_PATH="${GENERATED_PTX_DIR}/pixel_shuffle.ptx"
+  ADAPTIVE_AVG_POOL2D_PTX_PATH="${GENERATED_PTX_DIR}/adaptive_avg_pool2d.ptx"
+  LOCAL_RESPONSE_NORM_PTX_PATH="${GENERATED_PTX_DIR}/local_response_norm.ptx"
+  FUSED_ADD_NORM_PTX_PATH="${GENERATED_PTX_DIR}/fused_add_norm.ptx"
+  CUMSUM_PTX_PATH="${GENERATED_PTX_DIR}/cumsum.ptx"
 )
 add_dependencies(gpu_reference_runner
   generate_bias_add_ptx
@@ -461,6 +473,12 @@ add_dependencies(gpu_reference_runner
   generate_upsample_nearest2d_ptx
   generate_depthwise_conv2d_ptx
   generate_repeat_kv_ptx
+  generate_channel_shuffle_ptx
+  generate_pixel_shuffle_ptx
+  generate_adaptive_avg_pool2d_ptx
+  generate_local_response_norm_ptx
+  generate_fused_add_norm_ptx
+  generate_cumsum_ptx
 )
 add_test(
   NAME kernels.gpu_reference_differential

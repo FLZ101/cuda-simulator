@@ -49,20 +49,24 @@ Enabled operators:
   `hardswish`, `softsign`, `log_sigmoid`, `subtract`, `divide`, `copysign`,
   `lerp`, `cosh`, `sinh`, `asin`, `atan`, `cbrt`, `mish`, `expm1`, `atan2`,
   `hypot`
-- normalization: `batch_norm`, `layer_norm`, `rms_norm`, `instance_norm`
-- reduction: `reduce_sum`, `mean`, `argmax`, `global_avg_pool`
+- normalization: `batch_norm`, `layer_norm`, `rms_norm`, `instance_norm`,
+  `local_response_norm`, `fused_add_norm`
+- reduction: `reduce_sum`, `mean`, `argmax`, `global_avg_pool`, `cumsum`
 - matrix: `matmul_naive`, `matmul_tiled`, `transpose`
 - convolution/pooling: `conv2d_naive`, `conv2d_im2col`, `conv2d_shared`,
-  `max_pool2d`, `avg_pool2d`, `depthwise_conv2d`
+  `max_pool2d`, `avg_pool2d`, `depthwise_conv2d`, `adaptive_avg_pool2d`
 - transformer: `embedding_lookup`, `attention_scores`, `softmax_row`,
   `log_softmax`, `causal_mask`, `dropout`, `masked_fill`, `alibi_bias`,
   `repeat_kv`
 - data movement/reshape helpers: `concat`, `split`, `clamp`,
-  `cross_entropy`, `residual_add`, `pad2d`, `upsample_nearest2d`
+  `cross_entropy`, `residual_add`, `pad2d`, `upsample_nearest2d`,
+  `channel_shuffle`, `pixel_shuffle`
 
 `pow` is enabled. Its optimized NVVM path required additional rounding,
 conversion, and unordered-comparison opcodes (`add.rn.f32`, `mul.rn.f32`,
 `cvt.rn.f32.u32`, `cvt.rzi.f32.f32`, `xor.b32`, and `setp.*u.f32`).
+The adaptive-pooling and LRN kernels additionally required `not.b32` and
+`neg.s32` for NVVM's vectorized loop epilogues and signed window bounds.
 
 ## Important Implementation Details
 
