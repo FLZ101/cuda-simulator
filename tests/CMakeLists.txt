@@ -629,6 +629,57 @@ add_test(
           --output-dir ${CMAKE_CURRENT_BINARY_DIR}/models/matmul
 )
 
+set(MLP_RUNNER_SRC ${GENERATED_MODEL_DIR}/mlp_runner.cu)
+
+add_custom_command(
+  OUTPUT ${MLP_RUNNER_SRC}
+  COMMAND ${SIM_PYTHON} ${CMAKE_CURRENT_SOURCE_DIR}/models/generate_model_runner.py
+          --spec mlp
+          --output-cpp ${MLP_RUNNER_SRC}
+          --batch 4
+          --in-features 16
+          --hidden 32
+          --out-features 8
+          --block 32
+  DEPENDS
+    ${CMAKE_CURRENT_SOURCE_DIR}/models/generate_model_runner.py
+    ${CMAKE_CURRENT_SOURCE_DIR}/models/specs/mlp.py
+  VERBATIM
+)
+
+add_executable(mlp_model_runner ${MLP_RUNNER_SRC})
+set_target_properties(mlp_model_runner PROPERTIES
+  CUDA_STANDARD 20
+  CUDA_STANDARD_REQUIRED ON
+  CUDA_ARCHITECTURES 86
+)
+target_link_libraries(mlp_model_runner PRIVATE CUDA::cuda_driver)
+
+add_test(
+  NAME models.mlp.runner_cpu
+  COMMAND ${SIM_PYTHON} ${CMAKE_CURRENT_SOURCE_DIR}/models/model_runner.py
+          --spec mlp
+          --mode cpu
+          --runner $<TARGET_FILE:mlp_model_runner>
+          --cudart $<TARGET_FILE:cudart_shim>
+          --cuda $<TARGET_FILE:cuda_shim>
+          --core-dir $<TARGET_FILE_DIR:cudasim_core>
+          --output-dir ${CMAKE_CURRENT_BINARY_DIR}/models/mlp
+)
+add_test(
+  NAME models.mlp.runner_sim
+  COMMAND ${SIM_PYTHON} ${CMAKE_CURRENT_SOURCE_DIR}/models/model_runner.py
+          --spec mlp
+          --mode gpu
+          --simulate
+          --compare
+          --runner $<TARGET_FILE:mlp_model_runner>
+          --cudart $<TARGET_FILE:cudart_shim>
+          --cuda $<TARGET_FILE:cuda_shim>
+          --core-dir $<TARGET_FILE_DIR:cudasim_core>
+          --output-dir ${CMAKE_CURRENT_BINARY_DIR}/models/mlp
+)
+
 add_executable(runtime_api_smoke
   compat/runtime_api_smoke.cpp
 )

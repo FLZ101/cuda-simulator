@@ -155,6 +155,7 @@ bank, so generated indices such as `r716` do not alias `rd` or `f` registers.
 - `tests/reference/run_gpu_reference.py`
 - `tests/models/model_runner.py`
 - `tests/models/generate_model_runner.py`
+- `tests/models/specs/mlp.py`
 - `tests/CMakeLists.txt`
 
 ## Next Steps

@@ -33,6 +33,7 @@ tests/models/model_runner.py
 tests/models/generate_model_runner.py
 tests/models/specs/vector_add.py
 tests/models/specs/matmul.py
+tests/models/specs/mlp.py
 ```
 
 ## Acceptance Checks
@@ -499,7 +500,17 @@ Comparison requirements:
 - verification: `models.vector_add.runner_cpu`,
   `models.vector_add.runner_sim`, `models.matmul.runner_cpu`, and
   `models.matmul.runner_sim` pass.
-+
+
+- Added the MLP PyTorch-generated model runner spec. The spec compiles two
+  Triton linear kernels with different `k` constexpr values and one ReLU
+  kernel, then embeds all three as uniquely named PTX entries in the generated
+  CUDA host runner. `_compile_kernel` now returns the exact `CompiledKernel`
+  from the Triton launch instead of an arbitrary cache entry, which fixes
+  reuse of a linear kernel compiled with the first layer width.
+- files: `tests/models/specs/mlp.py`, `tests/CMakeLists.txt`
+- verification: `models.mlp.runner_cpu`, `models.mlp.runner_sim`, all six
+  `models.*.runner_*` tests, and the full 34-test CTest suite pass.
+
 ## Verification
 
 Commands run:
@@ -508,14 +519,14 @@ Commands run:
 cmake --build build -j 4
 ctest --test-dir build -R kernels.gpu_reference_differential_detection --output-on-failure
 ctest --test-dir build -R kernels.gpu_reference_differential_sequence --output-on-failure
-ctest --test-dir build -R 'models\.(vector_add|matmul)\.runner_(cpu|sim)' --output-on-failure
+ctest --test-dir build -R 'models\.(vector_add|matmul|mlp)\.runner_(cpu|sim)' --output-on-failure
 ctest --test-dir build --output-on-failure
 ```
 
 Result:
 
 ```text
-100% tests passed, 0 tests failed out of 32
+100% tests passed, 0 tests failed out of 34
 ```
 
 Required before Step 9:
