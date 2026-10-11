@@ -49,6 +49,9 @@ SUPPORTED_OPERATORS = {
     "sigmoid",
     "silu",
     "reciprocal",
+    "exp",
+    "log",
+    "sqrt",
 }
 
 
@@ -150,6 +153,10 @@ def main():
         run_pair("tanh", lambda out: [x_path, str(n), out])
         run_pair("silu", lambda out: [x_path, str(n), out])
         run_pair("reciprocal", lambda out: [x_path, str(n), out])
+        run_pair("exp", lambda out: [x_path, str(n), out])
+        run_pair("log", lambda out: [y_path, str(n), out])
+        run_pair("sqrt", lambda out: [y_path, str(n), out])
+        run_pair("pow", lambda out: [y_path, "2.0", str(n), out])
         bias = [0.1, -0.2, 0.3, 0.4]
         bias_path = os.path.join(tmp, "bias.bin")
         write_floats(bias_path, bias)

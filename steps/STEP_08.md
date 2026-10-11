@@ -355,6 +355,10 @@ Comparison requirements:
 - files: `tests/kernels/sigmoid.cu`, `tests/kernels/silu.cu`, `src/exec/executor.cpp`
 - verification: `make test` is green with `sigmoid` and `silu` enabled.
 
+- Added `exp`, `log`, and `sqrt` kernels and enabled them. Added `pow` source/PTX generation but left it disabled because its optimized NVVM path needs more rounding/convert opcodes.
+- files: `tests/kernels/exp.cu`, `tests/kernels/log.cu`, `tests/kernels/sqrt.cu`, `tests/kernels/pow.cu`, `src/exec/executor.cpp`, `tests/reference/gpu_reference_runner.cu`, `tests/reference/run_gpu_reference.py`, `tests/CMakeLists.txt`
+- verification: `make test` is green with the current supported subset.
+
 ## Verification
 
 Commands run:

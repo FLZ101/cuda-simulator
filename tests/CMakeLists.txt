@@ -68,6 +68,10 @@ set(CLASSIC_KERNEL_NAMES
   tanh
   silu
   reciprocal
+  exp
+  log
+  sqrt
+  pow
 )
 
 add_custom_command(
@@ -282,6 +286,10 @@ target_compile_definitions(gpu_reference_runner PRIVATE
   TANH_PTX_PATH="${GENERATED_PTX_DIR}/tanh.ptx"
   SILU_PTX_PATH="${GENERATED_PTX_DIR}/silu.ptx"
   RECIPROCAL_PTX_PATH="${GENERATED_PTX_DIR}/reciprocal.ptx"
+  EXP_PTX_PATH="${GENERATED_PTX_DIR}/exp.ptx"
+  LOG_PTX_PATH="${GENERATED_PTX_DIR}/log.ptx"
+  SQRT_PTX_PATH="${GENERATED_PTX_DIR}/sqrt.ptx"
+  POW_PTX_PATH="${GENERATED_PTX_DIR}/pow.ptx"
 )
 add_dependencies(gpu_reference_runner
   generate_bias_add_ptx
@@ -323,6 +331,10 @@ add_dependencies(gpu_reference_runner
   generate_tanh_ptx
   generate_silu_ptx
   generate_reciprocal_ptx
+  generate_exp_ptx
+  generate_log_ptx
+  generate_sqrt_ptx
+  generate_pow_ptx
 )
 add_test(
   NAME kernels.gpu_reference_differential

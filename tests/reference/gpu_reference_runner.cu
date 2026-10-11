@@ -929,7 +929,8 @@ int main(int argc, char **argv) {
   }
 
   if (mode == "sigmoid" || mode == "tanh" || mode == "silu" ||
-      mode == "reciprocal") {
+      mode == "reciprocal" || mode == "exp" || mode == "log" ||
+      mode == "sqrt") {
     if (argc != 5) {
       return 59;
     }
@@ -952,6 +953,15 @@ int main(int argc, char **argv) {
     } else if (mode == "silu") {
       ptx = SILU_PTX_PATH;
       name = "silu";
+    } else if (mode == "exp") {
+      ptx = EXP_PTX_PATH;
+      name = "exp_kernel";
+    } else if (mode == "log") {
+      ptx = LOG_PTX_PATH;
+      name = "log_kernel";
+    } else if (mode == "sqrt") {
+      ptx = SQRT_PTX_PATH;
+      name = "sqrt_kernel";
     } else {
       ptx = RECIPROCAL_PTX_PATH;
       name = "reciprocal";
@@ -959,6 +969,30 @@ int main(int argc, char **argv) {
     CUfunction f = load_function(ptx, name);
     if (!f || !launch_1d(f, params, n)) {
       return 60;
+    }
+    std::vector<float> output(input.size());
+    cuMemcpyDtoH(output.data(), d_out, bytes);
+    write_floats(out_path, output);
+    return 0;
+  }
+
+  if (mode == "pow") {
+    if (argc != 6) {
+      return 61;
+    }
+    auto input = read_floats(argv[2]);
+    const float exponent = std::stof(argv[3]);
+    const int n = std::stoi(argv[4]);
+    const std::size_t bytes = input.size() * sizeof(float);
+    CUdeviceptr d_in = alloc_copy(input.data(), bytes);
+    CUdeviceptr d_out = 0;
+    cuMemAlloc(&d_out, bytes);
+    int count = n;
+    float e = exponent;
+    std::vector<void *> params = {&d_in, &d_out, &e, &count};
+    CUfunction f = load_function(POW_PTX_PATH, "pow_kernel");
+    if (!f || !launch_1d(f, params, n)) {
+      return 62;
     }
     std::vector<float> output(input.size());
     cuMemcpyDtoH(output.data(), d_out, bytes);

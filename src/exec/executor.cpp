@@ -665,7 +665,8 @@ bool execute_instruction(
     return true;
   }
 
-  if (opcode == "setp.ge.f32" || opcode == "setp.gt.f32") {
+  if (opcode == "setp.ge.f32" || opcode == "setp.gt.f32" ||
+      opcode == "setp.lt.f32" || opcode == "setp.eq.f32") {
     std::size_t pos = 0;
     if (pos >= instruction.operand_tokens.size() ||
         instruction.operand_tokens[pos].kind !=
@@ -686,8 +687,15 @@ bool execute_instruction(
     if (!a || !b || pred_index >= registers.predicates.size()) {
       return false;
     }
-    registers.predicates[pred_index][lane] =
-        opcode == "setp.ge.f32" ? *a >= *b : *a > *b;
+    if (opcode == "setp.ge.f32") {
+      registers.predicates[pred_index][lane] = *a >= *b;
+    } else if (opcode == "setp.gt.f32") {
+      registers.predicates[pred_index][lane] = *a > *b;
+    } else if (opcode == "setp.lt.f32") {
+      registers.predicates[pred_index][lane] = *a < *b;
+    } else {
+      registers.predicates[pred_index][lane] = *a == *b;
+    }
     next_pc = pc + 1;
     return true;
   }
