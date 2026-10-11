@@ -381,6 +381,13 @@ Comparison requirements:
   `tests/reference/run_gpu_reference.py`, `tests/CMakeLists.txt`
 - verification: `make test` is green with all 18 tests passing.
 
+- Added `exp2` and `log2` kernels to the real-GPU operator harness. Added
+  `ex2.approx.f32`.
+- files: `tests/kernels/exp2.cu`, `tests/kernels/log2.cu`,
+  `src/exec/executor.cpp`, `tests/reference/gpu_reference_runner.cu`,
+  `tests/reference/run_gpu_reference.py`, `tests/CMakeLists.txt`
+- verification: `make test` is green with all 18 tests passing.
+
 ## Verification
 
 Commands run:

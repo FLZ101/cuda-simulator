@@ -62,6 +62,8 @@ SUPPORTED_OPERATORS = {
     "softplus",
     "swiglu",
     "elu",
+    "exp2",
+    "log2",
 }
 
 
@@ -179,6 +181,8 @@ def main():
         run_pair("softplus", lambda out: [signed_path, str(n), out])
         run_pair("swiglu", lambda out: [x_path, y_path, str(n), out])
         run_pair("elu", lambda out: [signed_path, "1.0", str(n), out])
+        run_pair("exp2", lambda out: [signed_path, str(n), out])
+        run_pair("log2", lambda out: [y_path, str(n), out])
         bias = [0.1, -0.2, 0.3, 0.4]
         bias_path = os.path.join(tmp, "bias.bin")
         write_floats(bias_path, bias)

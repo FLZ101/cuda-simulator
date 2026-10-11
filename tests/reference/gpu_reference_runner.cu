@@ -928,7 +928,7 @@ int main(int argc, char **argv) {
   if (mode == "sigmoid" || mode == "tanh" || mode == "silu" ||
       mode == "reciprocal" || mode == "exp" || mode == "log" ||
       mode == "sqrt" || mode == "rsqrt" || mode == "abs" || mode == "relu6" ||
-      mode == "softplus") {
+      mode == "softplus" || mode == "exp2" || mode == "log2") {
     if (argc != 5) {
       return 59;
     }
@@ -972,6 +972,12 @@ int main(int argc, char **argv) {
     } else if (mode == "softplus") {
       ptx = SOFTPLUS_PTX_PATH;
       name = "softplus";
+    } else if (mode == "exp2") {
+      ptx = EXP2_PTX_PATH;
+      name = "exp2_kernel";
+    } else if (mode == "log2") {
+      ptx = LOG2_PTX_PATH;
+      name = "log2_kernel";
     } else {
       ptx = RECIPROCAL_PTX_PATH;
       name = "reciprocal";

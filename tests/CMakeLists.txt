@@ -81,6 +81,8 @@ set(CLASSIC_KERNEL_NAMES
   softplus
   swiglu
   elu
+  exp2
+  log2
 )
 
 add_custom_command(
@@ -308,6 +310,8 @@ target_compile_definitions(gpu_reference_runner PRIVATE
   SOFTPLUS_PTX_PATH="${GENERATED_PTX_DIR}/softplus.ptx"
   SWIGLU_PTX_PATH="${GENERATED_PTX_DIR}/swiglu.ptx"
   ELU_PTX_PATH="${GENERATED_PTX_DIR}/elu.ptx"
+  EXP2_PTX_PATH="${GENERATED_PTX_DIR}/exp2.ptx"
+  LOG2_PTX_PATH="${GENERATED_PTX_DIR}/log2.ptx"
 )
 add_dependencies(gpu_reference_runner
   generate_bias_add_ptx
@@ -362,6 +366,8 @@ add_dependencies(gpu_reference_runner
   generate_softplus_ptx
   generate_swiglu_ptx
   generate_elu_ptx
+  generate_exp2_ptx
+  generate_log2_ptx
 )
 add_test(
   NAME kernels.gpu_reference_differential

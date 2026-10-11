@@ -1550,9 +1550,10 @@ bool execute_instruction(
   }
 
   if (opcode == "neg.f32" || opcode == "cvt.sat.f32.f32" ||
-      opcode == "ex2.approx.ftz.f32" || opcode == "abs.f32" ||
-      opcode == "rcp.approx.ftz.f32" || opcode == "rcp.rn.f32" ||
-      opcode == "cvt.rzi.f32.f32" || opcode == "rsqrt.approx.f32") {
+      opcode == "ex2.approx.ftz.f32" || opcode == "ex2.approx.f32" ||
+      opcode == "abs.f32" || opcode == "rcp.approx.ftz.f32" ||
+      opcode == "rcp.rn.f32" || opcode == "cvt.rzi.f32.f32" ||
+      opcode == "rsqrt.approx.f32") {
     std::size_t pos = 0;
     auto dst = parse_register(instruction.operand_tokens, pos);
     auto a =
