@@ -138,6 +138,11 @@ set(KERNELS_convolution
   pixel_shuffle
   pixel_unshuffle
   channel_shuffle
+  conv1d
+  conv3d
+  fold
+  unfold
+  deform_conv2d
 )
 
 set(KERNELS_normalization
@@ -148,6 +153,8 @@ set(KERNELS_normalization
   rms_norm
   local_response_norm
   fused_add_norm
+  weight_norm
+  spectral_norm
 )
 
 set(KERNELS_reduction
@@ -171,6 +178,10 @@ set(KERNELS_reduction
   count_nonzero
   all
   any
+  median
+  quantile
+  mode
+  searchsorted
 )
 
 set(KERNELS_attention
@@ -206,6 +217,8 @@ set(KERNELS_attention
   gated_mlp
   fused_rms_norm_linear
   fused_layer_norm_linear
+  cross_attention
+  local_attention
 )
 
 set(KERNELS_indexing
@@ -240,6 +253,14 @@ set(KERNELS_indexing
   roll
   flip
   rot90
+  permute
+  reshape
+  squeeze
+  unsqueeze
+  chunk
+  unbind
+  meshgrid
+  swapaxes
 )
 
 set(KERNELS_loss
@@ -260,6 +281,10 @@ set(KERNELS_loss
   soft_margin_loss
   focal_loss
   cosine_similarity
+  ctc_loss
+  gaussian_nll_loss
+  multilabel_margin_loss
+  multimargin_loss
 )
 
 set(KERNELS_matrix
@@ -272,6 +297,10 @@ set(KERNELS_matrix
   outer_product
   dot_product
   einsum
+  tensordot
+  kron
+  mv
+  bmm
 )
 
 set(KERNELS_misc
@@ -292,6 +321,11 @@ set(KERNELS_detection
   roi_align
   box_decode
   box_encode
+  diou
+  giou
+  anchor_generate
+  batched_nms
+  generate_proposals
 )
 
 set(KERNELS_sequence
@@ -301,6 +335,9 @@ set(KERNELS_sequence
   sequence_mask
   beam_search
   ctc_decode
+  ctc_prefix_beam_search
+  attention_decoder
+  transformer_decoder
 )
 
 add_custom_command(

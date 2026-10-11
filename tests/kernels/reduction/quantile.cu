@@ -1,0 +1,27 @@
+extern "C" __global__ void quantile(
+    const float *a, const float *b, const float *c, const float *d,
+    const int *idx, float *out, int p0, int p1, int p2, int p3, int p4,
+    int p5, int p6, int p7, float f0, float f1, float f2, float f3) {
+  if (blockIdx.x != 0 || threadIdx.x != 0 || p1 <= 0) {
+    return;
+  }
+  const int n = p1;
+  const float q = fmaxf(0.0F, fminf(1.0F, f0));
+  const int target = static_cast<int>(q * static_cast<float>(n - 1) + 0.5F);
+  float result = a[0];
+  for (int i = 0; i < n; ++i) {
+    int count = 0;
+    int duplicates = 0;
+    for (int j = 0; j < n; ++j) {
+      if (a[j] < a[i]) {
+        ++count;
+      } else if (a[j] == a[i]) {
+        ++duplicates;
+      }
+    }
+    if (count <= target && count + duplicates > target && a[i] < result) {
+      result = a[i];
+    }
+  }
+  out[0] = result;
+}

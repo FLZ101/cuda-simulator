@@ -236,6 +236,43 @@ SUPPORTED_OPERATORS = {
     "sequence_mask",
     "beam_search",
     "ctc_decode",
+    "conv1d",
+    "conv3d",
+    "fold",
+    "unfold",
+    "deform_conv2d",
+    "weight_norm",
+    "spectral_norm",
+    "median",
+    "quantile",
+    "mode",
+    "searchsorted",
+    "cross_attention",
+    "local_attention",
+    "permute",
+    "reshape",
+    "squeeze",
+    "unsqueeze",
+    "chunk",
+    "unbind",
+    "meshgrid",
+    "swapaxes",
+    "ctc_loss",
+    "gaussian_nll_loss",
+    "multilabel_margin_loss",
+    "multimargin_loss",
+    "tensordot",
+    "kron",
+    "mv",
+    "bmm",
+    "diou",
+    "giou",
+    "anchor_generate",
+    "batched_nms",
+    "generate_proposals",
+    "ctc_prefix_beam_search",
+    "attention_decoder",
+    "transformer_decoder",
 }
 
 OPERATOR_GROUPS = {
@@ -332,6 +369,11 @@ OPERATOR_GROUPS = {
         "pixel_shuffle",
         "pixel_unshuffle",
         "channel_shuffle",
+        "conv1d",
+        "conv3d",
+        "fold",
+        "unfold",
+        "deform_conv2d",
     },
     "normalization": {
         "batch_norm",
@@ -341,6 +383,8 @@ OPERATOR_GROUPS = {
         "rms_norm",
         "local_response_norm",
         "fused_add_norm",
+        "weight_norm",
+        "spectral_norm",
     },
     "reduction": {
         "reduce_sum",
@@ -363,6 +407,10 @@ OPERATOR_GROUPS = {
         "count_nonzero",
         "all",
         "any",
+        "median",
+        "quantile",
+        "mode",
+        "searchsorted",
     },
     "attention": {
         "attention_scores",
@@ -397,6 +445,8 @@ OPERATOR_GROUPS = {
         "gated_mlp",
         "fused_rms_norm_linear",
         "fused_layer_norm_linear",
+        "cross_attention",
+        "local_attention",
     },
     "indexing": {
         "concat",
@@ -430,6 +480,14 @@ OPERATOR_GROUPS = {
         "roll",
         "flip",
         "rot90",
+        "permute",
+        "reshape",
+        "squeeze",
+        "unsqueeze",
+        "chunk",
+        "unbind",
+        "meshgrid",
+        "swapaxes",
     },
     "loss": {
         "cross_entropy",
@@ -449,6 +507,10 @@ OPERATOR_GROUPS = {
         "soft_margin_loss",
         "focal_loss",
         "cosine_similarity",
+        "ctc_loss",
+        "gaussian_nll_loss",
+        "multilabel_margin_loss",
+        "multimargin_loss",
     },
     "matrix": {
         "matmul_naive",
@@ -460,6 +522,10 @@ OPERATOR_GROUPS = {
         "outer_product",
         "dot_product",
         "einsum",
+        "tensordot",
+        "kron",
+        "mv",
+        "bmm",
     },
     "misc": {
         "erf",
@@ -478,6 +544,11 @@ OPERATOR_GROUPS = {
         "roi_align",
         "box_decode",
         "box_encode",
+        "diou",
+        "giou",
+        "anchor_generate",
+        "batched_nms",
+        "generate_proposals",
     },
     "sequence": {
         "rnn_cell",
@@ -486,6 +557,9 @@ OPERATOR_GROUPS = {
         "sequence_mask",
         "beam_search",
         "ctc_decode",
+        "ctc_prefix_beam_search",
+        "attention_decoder",
+        "transformer_decoder",
     },
 }
 
@@ -1543,6 +1617,370 @@ def main():
                 ),
             ),
         )
+
+        conv1d_channels, conv1d_len, conv1d_out, conv1d_k = 2, 8, 3, 3
+        conv1d_in = [float((i % 7) - 3) for i in range(conv1d_channels * conv1d_len)]
+        conv1d_w = [
+            float((i * 5) % 9) / 9.0 for i in range(conv1d_out * conv1d_channels * conv1d_k)
+        ]
+        conv1d_in_path = os.path.join(tmp, "conv1d_in.bin")
+        conv1d_w_path = os.path.join(tmp, "conv1d_w.bin")
+        write_floats(conv1d_in_path, conv1d_in)
+        write_floats(conv1d_w_path, conv1d_w)
+        run_pair(
+            "conv1d",
+            generic_args(
+                conv1d_in_path,
+                conv1d_w_path,
+                ints=(
+                    conv1d_out * 6,
+                    conv1d_channels,
+                    conv1d_len,
+                    conv1d_out,
+                    conv1d_k,
+                    1,
+                    0,
+                    1,
+                ),
+            ),
+        )
+
+        conv3d_in = [float((i % 5) - 2) for i in range(4 * 4 * 4)]
+        conv3d_w = [float((i * 3) % 7) / 7.0 for i in range(2 * 2 * 2)]
+        conv3d_in_path = os.path.join(tmp, "conv3d_in.bin")
+        conv3d_w_path = os.path.join(tmp, "conv3d_w.bin")
+        write_floats(conv3d_in_path, conv3d_in)
+        write_floats(conv3d_w_path, conv3d_w)
+        run_pair(
+            "conv3d",
+            generic_args(conv3d_in_path, conv3d_w_path, ints=(27, 1, 4, 4, 4, 1, 2, 0)),
+        )
+
+        fold_in = [float((i % 4) - 1) for i in range(1 * 4 * 4)]
+        fold_in_path = os.path.join(tmp, "fold_in.bin")
+        write_floats(fold_in_path, fold_in)
+        run_pair("fold", generic_args(fold_in_path, ints=(4, 1, 4, 2, 2, 2)))
+        unfold_in = [float(i) for i in range(3 * 3)]
+        unfold_in_path = os.path.join(tmp, "unfold_in.bin")
+        write_floats(unfold_in_path, unfold_in)
+        run_pair("unfold", generic_args(unfold_in_path, ints=(16, 1, 3, 3, 2)))
+
+        deform_in = [float((i % 5) - 2) for i in range(4 * 4)]
+        deform_w = [0.25] * 4
+        deform_off = [0.0 if i % 2 == 0 else 0.1 for i in range(2 * 4 * 3 * 3)]
+        deform_in_path = os.path.join(tmp, "deform_in.bin")
+        deform_w_path = os.path.join(tmp, "deform_w.bin")
+        deform_off_path = os.path.join(tmp, "deform_off.bin")
+        write_floats(deform_in_path, deform_in)
+        write_floats(deform_w_path, deform_w)
+        write_floats(deform_off_path, deform_off)
+        run_pair(
+            "deform_conv2d",
+            generic_args(
+                deform_in_path,
+                deform_w_path,
+                deform_off_path,
+                ints=(9, 4, 4, 2, 3, 3),
+            ),
+        )
+
+        wn_rows, wn_cols = 2, 4
+        wn_v = [float((i % 5) - 2) for i in range(wn_rows * wn_cols)]
+        wn_g = [1.0, 2.0]
+        wn_v_path = os.path.join(tmp, "wn_v.bin")
+        wn_g_path = os.path.join(tmp, "wn_g.bin")
+        write_floats(wn_v_path, wn_v)
+        write_floats(wn_g_path, wn_g)
+        run_pair(
+            "weight_norm",
+            generic_args(wn_v_path, wn_g_path, ints=(wn_rows * wn_cols, wn_rows, wn_cols)),
+        )
+
+        sn_rows, sn_cols = 3, 4
+        sn_w = [float((i * 3) % 7) / 7.0 for i in range(sn_rows * sn_cols)]
+        sn_v = [0.25] * sn_cols
+        sn_w_path = os.path.join(tmp, "sn_w.bin")
+        sn_v_path = os.path.join(tmp, "sn_v.bin")
+        write_floats(sn_w_path, sn_w)
+        write_floats(sn_v_path, sn_v)
+        run_pair(
+            "spectral_norm",
+            generic_args(
+                sn_w_path, "-", "-", sn_v_path, ints=(sn_rows * sn_cols, sn_rows, sn_cols)
+            ),
+        )
+
+        red_median = [5.0, 3.0, 9.0, 3.0, 7.0, 3.0, 1.0, 8.0]
+        red_median_path = os.path.join(tmp, "red_median.bin")
+        write_floats(red_median_path, red_median)
+        run_pair("median", generic_args(red_median_path, ints=(1, len(red_median))))
+        run_pair(
+            "quantile",
+            generic_args(red_median_path, ints=(1, len(red_median)), floats=(0.5, 0.0, 0.0, 0.0)),
+        )
+        run_pair("mode", generic_args(red_median_path, ints=(1, len(red_median))))
+        sorted_values = [1.0, 3.0, 5.0, 7.0, 9.0]
+        sorted_values_path = os.path.join(tmp, "sorted_values.bin")
+        write_floats(sorted_values_path, sorted_values)
+        search_queries = [0.0, 3.0, 6.0, 10.0]
+        search_queries_path = os.path.join(tmp, "search_queries.bin")
+        write_floats(search_queries_path, search_queries)
+        run_pair(
+            "searchsorted",
+            generic_args(sorted_values_path, search_queries_path, ints=(4, 5, 4)),
+        )
+
+        ca_batch, ca_q, ca_k, ca_dim = 2, 3, 4, 4
+        ca_qv = [float((i % 5) - 2) for i in range(ca_batch * ca_q * ca_dim)]
+        ca_kv = [float((i % 7) - 3) for i in range(ca_batch * ca_k * ca_dim)]
+        ca_vv = [float((i % 6) - 2) for i in range(ca_batch * ca_k * ca_dim)]
+        ca_q_path = os.path.join(tmp, "ca_q.bin")
+        ca_k_path = os.path.join(tmp, "ca_k.bin")
+        ca_v_path = os.path.join(tmp, "ca_v.bin")
+        write_floats(ca_q_path, ca_qv)
+        write_floats(ca_k_path, ca_kv)
+        write_floats(ca_v_path, ca_vv)
+        run_pair(
+            "cross_attention",
+            generic_args(
+                ca_q_path,
+                ca_k_path,
+                ca_v_path,
+                ints=(ca_batch * ca_q * ca_dim, ca_batch, ca_q, ca_k, ca_dim),
+            ),
+        )
+        la_batch, la_heads, la_seq, la_dim = 1, 2, 4, 4
+        la_q = [float((i % 5) - 2) for i in range(la_batch * la_heads * la_seq * la_dim)]
+        la_k = [float((i % 7) - 3) for i in range(la_batch * la_heads * la_seq * la_dim)]
+        la_v = [float((i % 6) - 2) for i in range(la_batch * la_heads * la_seq * la_dim)]
+        la_q_path = os.path.join(tmp, "la_q.bin")
+        la_k_path = os.path.join(tmp, "la_k.bin")
+        la_v_path = os.path.join(tmp, "la_v.bin")
+        write_floats(la_q_path, la_q)
+        write_floats(la_k_path, la_k)
+        write_floats(la_v_path, la_v)
+        run_pair(
+            "local_attention",
+            generic_args(
+                la_q_path,
+                la_k_path,
+                la_v_path,
+                ints=(la_batch * la_heads * la_seq * la_dim, la_batch, la_heads, la_seq, la_dim, 2),
+            ),
+        )
+
+        permute_in = [float(i) for i in range(2 * 3 * 4)]
+        permute_in_path = os.path.join(tmp, "permute_in.bin")
+        write_floats(permute_in_path, permute_in)
+        run_pair("permute", generic_args(permute_in_path, ints=(24, 2, 3, 4, 1, 2, 0)))
+        run_pair("reshape", generic_args(permute_in_path, ints=(24, 2, 3, 4, 4, 2, 3)))
+        run_pair("squeeze", generic_args(x_path, ints=(8, 1, 8)))
+        run_pair("unsqueeze", generic_args(x_path, ints=(8, 8)))
+        chunk_in = [float(i) for i in range(10)]
+        chunk_in_path = os.path.join(tmp, "chunk_in.bin")
+        write_floats(chunk_in_path, chunk_in)
+        run_pair("chunk", generic_args(chunk_in_path, ints=(10, 3, 10)))
+        unbind_in = [float(i) for i in range(4 * 3)]
+        unbind_in_path = os.path.join(tmp, "unbind_in.bin")
+        write_floats(unbind_in_path, unbind_in)
+        run_pair("unbind", generic_args(unbind_in_path, ints=(12, 4, 3)))
+        mesh_x = [0.0, 1.0, 2.0]
+        mesh_y = [10.0, 11.0, 12.0, 13.0]
+        mesh_x_path = os.path.join(tmp, "mesh_x.bin")
+        mesh_y_path = os.path.join(tmp, "mesh_y.bin")
+        write_floats(mesh_x_path, mesh_x)
+        write_floats(mesh_y_path, mesh_y)
+        run_pair("meshgrid", generic_args(mesh_x_path, mesh_y_path, ints=(24, 3, 4)))
+        swap_in = [float(i) for i in range(3 * 4)]
+        swap_in_path = os.path.join(tmp, "swap_in.bin")
+        write_floats(swap_in_path, swap_in)
+        run_pair("swapaxes", generic_args(swap_in_path, ints=(12, 3, 4)))
+
+        gaussian_var = [0.5 + (i % 3) * 0.25 for i in range(n)]
+        gaussian_var_path = os.path.join(tmp, "gaussian_var.bin")
+        write_floats(gaussian_var_path, gaussian_var)
+        run_pair(
+            "gaussian_nll_loss",
+            generic_args(x_path, y_path, gaussian_var_path, ints=(1, n)),
+        )
+        loss_logits = [float((i % 7) - 3) for i in range(2 * 8)]
+        loss_logits_path = os.path.join(tmp, "loss_logits.bin")
+        write_floats(loss_logits_path, loss_logits)
+        loss_targets = [0, 3]
+        loss_targets_path = os.path.join(tmp, "loss_targets.bin")
+        write_ints(loss_targets_path, loss_targets)
+        run_pair(
+            "multilabel_margin_loss",
+            generic_args(
+                loss_logits_path,
+                "-",
+                "-",
+                "-",
+                loss_targets_path,
+                ints=(2, 2, 8),
+            ),
+        )
+        run_pair(
+            "multimargin_loss",
+            generic_args(
+                loss_logits_path,
+                "-",
+                "-",
+                "-",
+                loss_targets_path,
+                ints=(2, 2, 8),
+                floats=(1.0, 0.0, 0.0, 0.0),
+            ),
+        )
+        run_pair(
+            "ctc_loss",
+            generic_args(
+                ctc_logits_path,
+                "-",
+                "-",
+                "-",
+                seq_lengths_path,
+                ints=(2, 2, 5, 8, 0, 0, 0, 7),
+            ),
+        )
+
+        td_in = [float((i % 5) - 2) for i in range(2 * 3 * 4)]
+        td_w = [float((i * 3) % 7) / 7.0 for i in range(4 * 5)]
+        td_in_path = os.path.join(tmp, "td_in.bin")
+        td_w_path = os.path.join(tmp, "td_w.bin")
+        write_floats(td_in_path, td_in)
+        write_floats(td_w_path, td_w)
+        run_pair("tensordot", generic_args(td_in_path, td_w_path, ints=(30, 2, 3, 4, 5)))
+        kron_a = [1.0, 2.0, 3.0, 4.0, 5.0, 6.0]
+        kron_b = [0.5, -0.5, 1.0, 2.0]
+        kron_a_path = os.path.join(tmp, "kron_a.bin")
+        kron_b_path = os.path.join(tmp, "kron_b.bin")
+        write_floats(kron_a_path, kron_a)
+        write_floats(kron_b_path, kron_b)
+        run_pair("kron", generic_args(kron_a_path, kron_b_path, ints=(24, 2, 3, 2, 2)))
+        mv_a = [float((i % 4) - 1) for i in range(3 * 4)]
+        mv_b = [0.25] * 4
+        mv_a_path = os.path.join(tmp, "mv_a.bin")
+        mv_b_path = os.path.join(tmp, "mv_b.bin")
+        write_floats(mv_a_path, mv_a)
+        write_floats(mv_b_path, mv_b)
+        run_pair("mv", generic_args(mv_a_path, mv_b_path, ints=(3, 3, 4)))
+        bmm_batch, bmm_m, bmm_k, bmm_n = 2, 3, 4, 2
+        bmm_a = [float((i % 5) - 2) for i in range(bmm_batch * bmm_m * bmm_k)]
+        bmm_b = [float((i * 3) % 7) / 7.0 for i in range(bmm_batch * bmm_k * bmm_n)]
+        bmm_a_path = os.path.join(tmp, "bmm_a.bin")
+        bmm_b_path = os.path.join(tmp, "bmm_b.bin")
+        write_floats(bmm_a_path, bmm_a)
+        write_floats(bmm_b_path, bmm_b)
+        run_pair(
+            "bmm",
+            generic_args(
+                bmm_a_path,
+                bmm_b_path,
+                ints=(bmm_batch * bmm_m * bmm_n, bmm_batch, bmm_m, bmm_k, bmm_n),
+            ),
+        )
+
+        run_pair("diou", generic_args(det_boxes1_path, det_boxes2_path, ints=(12, 4, 3, 4)))
+        run_pair("giou", generic_args(det_boxes1_path, det_boxes2_path, ints=(12, 4, 3, 4)))
+        run_pair(
+            "anchor_generate",
+            generic_args(ints=(24, 2, 3, 4), floats=(1.0, 0.0, 0.0, 0.0)),
+        )
+        bnms_boxes = [
+            0.0,
+            0.0,
+            4.0,
+            4.0,
+            2.0,
+            2.0,
+            6.0,
+            6.0,
+            5.0,
+            1.0,
+            8.0,
+            5.0,
+            0.0,
+            0.0,
+            3.0,
+            3.0,
+            1.0,
+            1.0,
+            5.0,
+            5.0,
+            6.0,
+            6.0,
+            9.0,
+            9.0,
+        ]
+        bnms_scores = [0.9, 0.7, 0.8, 0.6, 0.95, 0.75]
+        bnms_boxes_path = os.path.join(tmp, "bnms_boxes.bin")
+        bnms_scores_path = os.path.join(tmp, "bnms_scores.bin")
+        write_floats(bnms_boxes_path, bnms_boxes)
+        write_floats(bnms_scores_path, bnms_scores)
+        run_pair(
+            "batched_nms",
+            generic_args(
+                bnms_boxes_path,
+                bnms_scores_path,
+                ints=(6, 2, 3),
+                floats=(0.5, 0.0, 0.0, 0.0),
+            ),
+        )
+        gp_scores = [0.6, 0.9, 0.4, 0.8, 0.5]
+        gp_boxes = [
+            0.0,
+            0.0,
+            2.0,
+            2.0,
+            1.0,
+            1.0,
+            3.0,
+            3.0,
+            2.0,
+            2.0,
+            4.0,
+            4.0,
+            3.0,
+            3.0,
+            5.0,
+            5.0,
+            4.0,
+            4.0,
+            6.0,
+            6.0,
+        ]
+        gp_scores_path = os.path.join(tmp, "gp_scores.bin")
+        gp_boxes_path = os.path.join(tmp, "gp_boxes.bin")
+        write_floats(gp_scores_path, gp_scores)
+        write_floats(gp_boxes_path, gp_boxes)
+        run_pair("generate_proposals", generic_args(gp_scores_path, gp_boxes_path, ints=(12, 5, 3)))
+
+        run_pair(
+            "ctc_prefix_beam_search",
+            generic_args(
+                ctc_logits_path,
+                "-",
+                "-",
+                "-",
+                seq_lengths_path,
+                ints=(6, 2, 5, 8, 3),
+            ),
+        )
+        ad_enc = [float((i % 5) - 2) for i in range(2 * 4 * 4)]
+        ad_query = [float((i % 7) - 3) for i in range(2 * 4)]
+        ad_enc_path = os.path.join(tmp, "ad_enc.bin")
+        ad_query_path = os.path.join(tmp, "ad_query.bin")
+        write_floats(ad_enc_path, ad_enc)
+        write_floats(ad_query_path, ad_query)
+        run_pair(
+            "attention_decoder",
+            generic_args(ad_enc_path, ad_query_path, ints=(8, 2, 4, 4)),
+        )
+        tdec_in = [float((i % 5) - 2) for i in range(1 * 4 * 4)]
+        tdec_in_path = os.path.join(tmp, "tdec_in.bin")
+        write_floats(tdec_in_path, tdec_in)
+        run_pair("transformer_decoder", generic_args(tdec_in_path, ints=(16, 1, 4, 4)))
 
     print("operator kernels: PASS (supported subset)")
 
