@@ -928,7 +928,12 @@ int main(int argc, char **argv) {
   if (mode == "sigmoid" || mode == "tanh" || mode == "silu" ||
       mode == "reciprocal" || mode == "exp" || mode == "log" ||
       mode == "sqrt" || mode == "rsqrt" || mode == "abs" || mode == "relu6" ||
-      mode == "softplus" || mode == "exp2" || mode == "log2") {
+      mode == "softplus" || mode == "exp2" || mode == "log2" ||
+      mode == "floor" || mode == "ceil" || mode == "rint" || mode == "trunc" ||
+      mode == "acos" || mode == "erfc" || mode == "hard_sigmoid" ||
+      mode == "hardswish" || mode == "softsign" || mode == "log_sigmoid" ||
+      mode == "cosh" || mode == "sinh" || mode == "asin" || mode == "atan" ||
+      mode == "cbrt" || mode == "mish" || mode == "expm1") {
     if (argc != 5) {
       return 59;
     }
@@ -978,6 +983,57 @@ int main(int argc, char **argv) {
     } else if (mode == "log2") {
       ptx = LOG2_PTX_PATH;
       name = "log2_kernel";
+    } else if (mode == "floor") {
+      ptx = FLOOR_PTX_PATH;
+      name = "floor_kernel";
+    } else if (mode == "ceil") {
+      ptx = CEIL_PTX_PATH;
+      name = "ceil_kernel";
+    } else if (mode == "rint") {
+      ptx = RINT_PTX_PATH;
+      name = "rint_kernel";
+    } else if (mode == "trunc") {
+      ptx = TRUNC_PTX_PATH;
+      name = "trunc_kernel";
+    } else if (mode == "acos") {
+      ptx = ACOS_PTX_PATH;
+      name = "acos_kernel";
+    } else if (mode == "erfc") {
+      ptx = ERFC_PTX_PATH;
+      name = "erfc_kernel";
+    } else if (mode == "hard_sigmoid") {
+      ptx = HARD_SIGMOID_PTX_PATH;
+      name = "hard_sigmoid";
+    } else if (mode == "hardswish") {
+      ptx = HARDSWISH_PTX_PATH;
+      name = "hardswish";
+    } else if (mode == "softsign") {
+      ptx = SOFTSIGN_PTX_PATH;
+      name = "softsign";
+    } else if (mode == "log_sigmoid") {
+      ptx = LOG_SIGMOID_PTX_PATH;
+      name = "log_sigmoid";
+    } else if (mode == "cosh") {
+      ptx = COSH_PTX_PATH;
+      name = "cosh_kernel";
+    } else if (mode == "sinh") {
+      ptx = SINH_PTX_PATH;
+      name = "sinh_kernel";
+    } else if (mode == "asin") {
+      ptx = ASIN_PTX_PATH;
+      name = "asin_kernel";
+    } else if (mode == "atan") {
+      ptx = ATAN_PTX_PATH;
+      name = "atan_kernel";
+    } else if (mode == "cbrt") {
+      ptx = CBRT_PTX_PATH;
+      name = "cbrt_kernel";
+    } else if (mode == "mish") {
+      ptx = MISH_PTX_PATH;
+      name = "mish_kernel";
+    } else if (mode == "expm1") {
+      ptx = EXPM1_PTX_PATH;
+      name = "expm1_kernel";
     } else {
       ptx = RECIPROCAL_PTX_PATH;
       name = "reciprocal";
@@ -1036,6 +1092,52 @@ int main(int argc, char **argv) {
     CUfunction f = load_function(ptx, name);
     if (!f || !launch_1d(f, params, n)) {
       return 64;
+    }
+    std::vector<float> output(a.size());
+    cuMemcpyDtoH(output.data(), d_out, bytes);
+    write_floats(out_path, output);
+    return 0;
+  }
+
+  if (mode == "subtract" || mode == "divide" || mode == "copysign" ||
+      mode == "lerp" || mode == "atan2" || mode == "hypot") {
+    if (argc != 6) {
+      return 71;
+    }
+    auto a = read_floats(argv[2]);
+    auto b = read_floats(argv[3]);
+    const int n = std::stoi(argv[4]);
+    const std::size_t bytes = a.size() * sizeof(float);
+    CUdeviceptr d_a = alloc_copy(a.data(), bytes);
+    CUdeviceptr d_b = alloc_copy(b.data(), b.size() * sizeof(float));
+    CUdeviceptr d_out = 0;
+    cuMemAlloc(&d_out, bytes);
+    int count = n;
+    std::vector<void *> params = {&d_a, &d_b, &d_out, &count};
+    std::string ptx;
+    std::string name;
+    if (mode == "subtract") {
+      ptx = SUBTRACT_PTX_PATH;
+      name = "subtract_kernel";
+    } else if (mode == "divide") {
+      ptx = DIVIDE_PTX_PATH;
+      name = "divide_kernel";
+    } else if (mode == "copysign") {
+      ptx = COPYSIGN_PTX_PATH;
+      name = "copysign_kernel";
+    } else if (mode == "lerp") {
+      ptx = LERP_PTX_PATH;
+      name = "lerp_kernel";
+    } else if (mode == "atan2") {
+      ptx = ATAN2_PTX_PATH;
+      name = "atan2_kernel";
+    } else {
+      ptx = HYPOT_PTX_PATH;
+      name = "hypot_kernel";
+    }
+    CUfunction f = load_function(ptx, name);
+    if (!f || !launch_1d(f, params, n)) {
+      return 72;
     }
     std::vector<float> output(a.size());
     cuMemcpyDtoH(output.data(), d_out, bytes);

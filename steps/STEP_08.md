@@ -388,6 +388,17 @@ Comparison requirements:
   `tests/reference/run_gpu_reference.py`, `tests/CMakeLists.txt`
 - verification: `make test` is green with all 18 tests passing.
 
+- Added a broad math/elementwise operator batch: `floor`, `ceil`, `rint`,
+  `trunc`, `acos`, `erfc`, `hard_sigmoid`, `hardswish`, `softsign`,
+  `log_sigmoid`, `subtract`, `divide`, `copysign`, `lerp`, `cosh`, `sinh`,
+  `asin`, `atan`, `cbrt`, `mish`, `expm1`, `atan2`, and `hypot`. Added
+  `cvt.rmi/rpi/rni.f32.f32`, `div.approx.f32`, `lg2.approx.f32`,
+  `setp.le/leu/ltu.f32`, and `max/min.s32`.
+- files: `tests/kernels/*.cu`, `src/exec/executor.cpp`,
+  `tests/reference/gpu_reference_runner.cu`,
+  `tests/reference/run_gpu_reference.py`, `tests/CMakeLists.txt`
+- verification: `make test` is green with all 18 tests passing.
+
 ## Verification
 
 Commands run:

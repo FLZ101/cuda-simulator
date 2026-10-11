@@ -83,6 +83,29 @@ set(CLASSIC_KERNEL_NAMES
   elu
   exp2
   log2
+  floor
+  ceil
+  rint
+  trunc
+  acos
+  erfc
+  hard_sigmoid
+  hardswish
+  softsign
+  log_sigmoid
+  subtract
+  divide
+  copysign
+  lerp
+  cosh
+  sinh
+  asin
+  atan
+  cbrt
+  mish
+  expm1
+  atan2
+  hypot
 )
 
 add_custom_command(
@@ -312,6 +335,29 @@ target_compile_definitions(gpu_reference_runner PRIVATE
   ELU_PTX_PATH="${GENERATED_PTX_DIR}/elu.ptx"
   EXP2_PTX_PATH="${GENERATED_PTX_DIR}/exp2.ptx"
   LOG2_PTX_PATH="${GENERATED_PTX_DIR}/log2.ptx"
+  FLOOR_PTX_PATH="${GENERATED_PTX_DIR}/floor.ptx"
+  CEIL_PTX_PATH="${GENERATED_PTX_DIR}/ceil.ptx"
+  RINT_PTX_PATH="${GENERATED_PTX_DIR}/rint.ptx"
+  TRUNC_PTX_PATH="${GENERATED_PTX_DIR}/trunc.ptx"
+  ACOS_PTX_PATH="${GENERATED_PTX_DIR}/acos.ptx"
+  ERFC_PTX_PATH="${GENERATED_PTX_DIR}/erfc.ptx"
+  HARD_SIGMOID_PTX_PATH="${GENERATED_PTX_DIR}/hard_sigmoid.ptx"
+  HARDSWISH_PTX_PATH="${GENERATED_PTX_DIR}/hardswish.ptx"
+  SOFTSIGN_PTX_PATH="${GENERATED_PTX_DIR}/softsign.ptx"
+  LOG_SIGMOID_PTX_PATH="${GENERATED_PTX_DIR}/log_sigmoid.ptx"
+  SUBTRACT_PTX_PATH="${GENERATED_PTX_DIR}/subtract.ptx"
+  DIVIDE_PTX_PATH="${GENERATED_PTX_DIR}/divide.ptx"
+  COPYSIGN_PTX_PATH="${GENERATED_PTX_DIR}/copysign.ptx"
+  LERP_PTX_PATH="${GENERATED_PTX_DIR}/lerp.ptx"
+  COSH_PTX_PATH="${GENERATED_PTX_DIR}/cosh.ptx"
+  SINH_PTX_PATH="${GENERATED_PTX_DIR}/sinh.ptx"
+  ASIN_PTX_PATH="${GENERATED_PTX_DIR}/asin.ptx"
+  ATAN_PTX_PATH="${GENERATED_PTX_DIR}/atan.ptx"
+  CBRT_PTX_PATH="${GENERATED_PTX_DIR}/cbrt.ptx"
+  MISH_PTX_PATH="${GENERATED_PTX_DIR}/mish.ptx"
+  EXPM1_PTX_PATH="${GENERATED_PTX_DIR}/expm1.ptx"
+  ATAN2_PTX_PATH="${GENERATED_PTX_DIR}/atan2.ptx"
+  HYPOT_PTX_PATH="${GENERATED_PTX_DIR}/hypot.ptx"
 )
 add_dependencies(gpu_reference_runner
   generate_bias_add_ptx
@@ -368,6 +414,29 @@ add_dependencies(gpu_reference_runner
   generate_elu_ptx
   generate_exp2_ptx
   generate_log2_ptx
+  generate_floor_ptx
+  generate_ceil_ptx
+  generate_rint_ptx
+  generate_trunc_ptx
+  generate_acos_ptx
+  generate_erfc_ptx
+  generate_hard_sigmoid_ptx
+  generate_hardswish_ptx
+  generate_softsign_ptx
+  generate_log_sigmoid_ptx
+  generate_subtract_ptx
+  generate_divide_ptx
+  generate_copysign_ptx
+  generate_lerp_ptx
+  generate_cosh_ptx
+  generate_sinh_ptx
+  generate_asin_ptx
+  generate_atan_ptx
+  generate_cbrt_ptx
+  generate_mish_ptx
+  generate_expm1_ptx
+  generate_atan2_ptx
+  generate_hypot_ptx
 )
 add_test(
   NAME kernels.gpu_reference_differential

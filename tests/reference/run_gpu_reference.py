@@ -64,6 +64,29 @@ SUPPORTED_OPERATORS = {
     "elu",
     "exp2",
     "log2",
+    "floor",
+    "ceil",
+    "rint",
+    "trunc",
+    "acos",
+    "erfc",
+    "hard_sigmoid",
+    "hardswish",
+    "softsign",
+    "log_sigmoid",
+    "subtract",
+    "divide",
+    "copysign",
+    "lerp",
+    "cosh",
+    "sinh",
+    "asin",
+    "atan",
+    "cbrt",
+    "mish",
+    "expm1",
+    "atan2",
+    "hypot",
 }
 
 
@@ -123,6 +146,12 @@ def main():
         signed = [float((i % 7) - 3) for i in range(n)]
         signed_path = os.path.join(tmp, "signed.bin")
         write_floats(signed_path, signed)
+        unit = [float((i % 5) - 2) / 2.0 for i in range(n)]
+        unit_path = os.path.join(tmp, "unit.bin")
+        write_floats(unit_path, unit)
+        pos = [float(i + 1) for i in range(n)]
+        pos_path = os.path.join(tmp, "pos.bin")
+        write_floats(pos_path, pos)
         mask = [1.0 if i % 2 == 0 else 0.5 for i in range(n)]
         mask_path = os.path.join(tmp, "mask.bin")
         write_floats(mask_path, mask)
@@ -183,6 +212,29 @@ def main():
         run_pair("elu", lambda out: [signed_path, "1.0", str(n), out])
         run_pair("exp2", lambda out: [signed_path, str(n), out])
         run_pair("log2", lambda out: [y_path, str(n), out])
+        run_pair("floor", lambda out: [signed_path, str(n), out])
+        run_pair("ceil", lambda out: [signed_path, str(n), out])
+        run_pair("rint", lambda out: [signed_path, str(n), out])
+        run_pair("trunc", lambda out: [signed_path, str(n), out])
+        run_pair("acos", lambda out: [unit_path, str(n), out])
+        run_pair("erfc", lambda out: [signed_path, str(n), out])
+        run_pair("hard_sigmoid", lambda out: [signed_path, str(n), out])
+        run_pair("hardswish", lambda out: [signed_path, str(n), out])
+        run_pair("softsign", lambda out: [signed_path, str(n), out])
+        run_pair("log_sigmoid", lambda out: [signed_path, str(n), out])
+        run_pair("subtract", lambda out: [x_path, y_path, str(n), out])
+        run_pair("divide", lambda out: [x_path, pos_path, str(n), out])
+        run_pair("copysign", lambda out: [signed_path, x_path, str(n), out])
+        run_pair("lerp", lambda out: [x_path, y_path, str(n), out])
+        run_pair("cosh", lambda out: [signed_path, str(n), out])
+        run_pair("sinh", lambda out: [signed_path, str(n), out])
+        run_pair("asin", lambda out: [unit_path, str(n), out])
+        run_pair("atan", lambda out: [signed_path, str(n), out])
+        run_pair("cbrt", lambda out: [signed_path, str(n), out])
+        run_pair("mish", lambda out: [signed_path, str(n), out])
+        run_pair("expm1", lambda out: [signed_path, str(n), out])
+        run_pair("atan2", lambda out: [signed_path, pos_path, str(n), out])
+        run_pair("hypot", lambda out: [x_path, y_path, str(n), out])
         bias = [0.1, -0.2, 0.3, 0.4]
         bias_path = os.path.join(tmp, "bias.bin")
         write_floats(bias_path, bias)

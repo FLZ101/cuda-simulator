@@ -44,7 +44,11 @@ Enabled operators:
 - elementwise: `copy`, `saxpy`, `relu`, `gelu`, `elementwise_add`,
   `elementwise_mul`, `scale`, `neg`, `square`, `tanh`, `sigmoid`, `silu`,
   `reciprocal`, `exp`, `log`, `sqrt`, `pow`, `rsqrt`, `minimum`, `maximum`,
-  `leaky_relu`, `abs`, `relu6`, `softplus`, `swiglu`, `elu`, `exp2`, `log2`
+  `leaky_relu`, `abs`, `relu6`, `softplus`, `swiglu`, `elu`, `exp2`, `log2`,
+  `floor`, `ceil`, `rint`, `trunc`, `acos`, `erfc`, `hard_sigmoid`,
+  `hardswish`, `softsign`, `log_sigmoid`, `subtract`, `divide`, `copysign`,
+  `lerp`, `cosh`, `sinh`, `asin`, `atan`, `cbrt`, `mish`, `expm1`, `atan2`,
+  `hypot`
 - normalization: `batch_norm`, `layer_norm`, `rms_norm`
 - reduction: `reduce_sum`, `mean`, `argmax`
 - matrix: `matmul_naive`, `matmul_tiled`, `transpose`
