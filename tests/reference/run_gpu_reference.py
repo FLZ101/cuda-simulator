@@ -7,6 +7,8 @@ import struct
 import subprocess
 import tempfile
 
+# Operators currently executed in the real-GPU differential harness.
+# Add new operators here and add a deterministic run_pair case below.
 SUPPORTED_OPERATORS = {
     "bias_add",
     "batch_norm",
@@ -35,6 +37,18 @@ SUPPORTED_OPERATORS = {
     "causal_mask",
     "residual_add",
     "rms_norm",
+    "concat",
+    "split",
+    "argmax",
+    "clamp",
+    "neg",
+    "square",
+    "log_softmax",
+    "cross_entropy",
+    "tanh",
+    "sigmoid",
+    "silu",
+    "reciprocal",
 }
 
 
@@ -97,6 +111,9 @@ def main():
         causal = [float(i) for i in range(16)]
         causal_path = os.path.join(tmp, "causal.bin")
         write_floats(causal_path, causal)
+        targets = [0, 1]
+        targets_path = os.path.join(tmp, "targets.bin")
+        write_ints(targets_path, targets)
         run_pair("gelu", lambda out: [x_path, str(n), out])
         run_pair("copy", lambda out: [x_path, str(n), out])
         run_pair("relu", lambda out: [x_path, str(n), out])
@@ -120,6 +137,19 @@ def main():
             "residual_add",
             lambda out: [x_path, y_path, str(n), out],
         )
+        run_pair(
+            "concat",
+            lambda out: [x_path, y_path, str(n), str(n), out],
+        )
+        run_pair("split", lambda out: [x_path, "64", str(n), out])
+        run_pair("argmax", lambda out: [x_path, str(n), out])
+        run_pair("clamp", lambda out: [x_path, "0.0", "10.0", str(n), out])
+        run_pair("neg", lambda out: [x_path, str(n), out])
+        run_pair("square", lambda out: [x_path, str(n), out])
+        run_pair("sigmoid", lambda out: [x_path, str(n), out])
+        run_pair("tanh", lambda out: [x_path, str(n), out])
+        run_pair("silu", lambda out: [x_path, str(n), out])
+        run_pair("reciprocal", lambda out: [x_path, str(n), out])
         bias = [0.1, -0.2, 0.3, 0.4]
         bias_path = os.path.join(tmp, "bias.bin")
         write_floats(bias_path, bias)
@@ -189,6 +219,14 @@ def main():
         sm_path = os.path.join(tmp, "sm.bin")
         write_floats(sm_path, sm_input)
         run_pair("softmax_row", lambda out: [sm_path, str(rows), str(cols), out])
+        run_pair(
+            "log_softmax",
+            lambda out: [sm_path, str(rows), str(cols), out],
+        )
+        run_pair(
+            "cross_entropy",
+            lambda out: [sm_path, targets_path, str(rows), str(cols), out],
+        )
 
         red_input = [float(i + 1) for i in range(256)]
         red_path = os.path.join(tmp, "red.bin")

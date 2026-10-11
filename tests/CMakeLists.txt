@@ -56,6 +56,18 @@ set(CLASSIC_KERNEL_NAMES
   causal_mask
   residual_add
   rms_norm
+  concat
+  split
+  argmax
+  clamp
+  neg
+  square
+  log_softmax
+  cross_entropy
+  sigmoid
+  tanh
+  silu
+  reciprocal
 )
 
 add_custom_command(
@@ -258,6 +270,18 @@ target_compile_definitions(gpu_reference_runner PRIVATE
   CAUSAL_MASK_PTX_PATH="${GENERATED_PTX_DIR}/causal_mask.ptx"
   RESIDUAL_ADD_PTX_PATH="${GENERATED_PTX_DIR}/residual_add.ptx"
   RMS_NORM_PTX_PATH="${GENERATED_PTX_DIR}/rms_norm.ptx"
+  CONCAT_PTX_PATH="${GENERATED_PTX_DIR}/concat.ptx"
+  SPLIT_PTX_PATH="${GENERATED_PTX_DIR}/split.ptx"
+  ARGMAX_PTX_PATH="${GENERATED_PTX_DIR}/argmax.ptx"
+  CLAMP_PTX_PATH="${GENERATED_PTX_DIR}/clamp.ptx"
+  NEG_PTX_PATH="${GENERATED_PTX_DIR}/neg.ptx"
+  SQUARE_PTX_PATH="${GENERATED_PTX_DIR}/square.ptx"
+  LOG_SOFTMAX_PTX_PATH="${GENERATED_PTX_DIR}/log_softmax.ptx"
+  CROSS_ENTROPY_PTX_PATH="${GENERATED_PTX_DIR}/cross_entropy.ptx"
+  SIGMOID_PTX_PATH="${GENERATED_PTX_DIR}/sigmoid.ptx"
+  TANH_PTX_PATH="${GENERATED_PTX_DIR}/tanh.ptx"
+  SILU_PTX_PATH="${GENERATED_PTX_DIR}/silu.ptx"
+  RECIPROCAL_PTX_PATH="${GENERATED_PTX_DIR}/reciprocal.ptx"
 )
 add_dependencies(gpu_reference_runner
   generate_bias_add_ptx
@@ -287,6 +311,18 @@ add_dependencies(gpu_reference_runner
   generate_causal_mask_ptx
   generate_residual_add_ptx
   generate_rms_norm_ptx
+  generate_concat_ptx
+  generate_split_ptx
+  generate_argmax_ptx
+  generate_clamp_ptx
+  generate_neg_ptx
+  generate_square_ptx
+  generate_log_softmax_ptx
+  generate_cross_entropy_ptx
+  generate_sigmoid_ptx
+  generate_tanh_ptx
+  generate_silu_ptx
+  generate_reciprocal_ptx
 )
 add_test(
   NAME kernels.gpu_reference_differential

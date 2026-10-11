@@ -126,6 +126,7 @@ void Parser::parse_directive(Module &module) {
   }
 
   if (name == "visible" || name == "extern" || name == "weak") {
+    // `.extern .shared` declares dynamic shared memory and is not a function.
     if (name == "extern" && current_.kind == TokenKind::Dot) {
       consume();
       const std::string qualifier =
@@ -303,6 +304,7 @@ VariableDecl Parser::parse_variable(const std::string &space) {
 
   if (current_.kind == TokenKind::LBracket) {
     consume();
+    // An empty array, `[]`, is a dynamic shared-memory declaration.
     if (current_.kind == TokenKind::RBracket) {
       variable.size.clear();
     } else {

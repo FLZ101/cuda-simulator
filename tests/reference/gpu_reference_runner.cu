@@ -77,6 +77,8 @@ CUfunction load_function(const std::string &ptx_path, const std::string &name) {
   if (cuModuleLoadData(&module, ptx.c_str()) != CUDA_SUCCESS) {
     return nullptr;
   }
+  // The shim stores the CUfunction as a pointer to the name. Keep a stable
+  // string alive until cuLaunchKernel has consumed it.
   static std::vector<std::string> function_names;
   function_names.push_back(name);
   const std::string &stable_name = function_names.back();
@@ -738,6 +740,225 @@ int main(int argc, char **argv) {
     CUfunction f = load_function(RMS_NORM_PTX_PATH, "rms_norm");
     if (!f || !launch_1d(f, params, rows, 1)) {
       return 44;
+    }
+    std::vector<float> output(input.size());
+    cuMemcpyDtoH(output.data(), d_out, bytes);
+    write_floats(out_path, output);
+    return 0;
+  }
+
+  if (mode == "concat") {
+    if (argc != 7) {
+      return 45;
+    }
+    auto a = read_floats(argv[2]);
+    auto b = read_floats(argv[3]);
+    const int a_size = std::stoi(argv[4]);
+    const int b_size = std::stoi(argv[5]);
+    const std::size_t bytes = (a.size() + b.size()) * sizeof(float);
+    CUdeviceptr d_a = alloc_copy(a.data(), a.size() * sizeof(float));
+    CUdeviceptr d_b = alloc_copy(b.data(), b.size() * sizeof(float));
+    CUdeviceptr d_out = 0;
+    cuMemAlloc(&d_out, bytes);
+    int as = a_size;
+    int bs = b_size;
+    std::vector<void *> params = {&d_a, &d_b, &d_out, &as, &bs};
+    CUfunction f = load_function(CONCAT_PTX_PATH, "concat");
+    if (!f || !launch_1d(f, params, a_size + b_size)) {
+      return 46;
+    }
+    std::vector<float> output(a.size() + b.size());
+    cuMemcpyDtoH(output.data(), d_out, bytes);
+    write_floats(out_path, output);
+    return 0;
+  }
+
+  if (mode == "split") {
+    if (argc != 6) {
+      return 47;
+    }
+    auto input = read_floats(argv[2]);
+    const int split = std::stoi(argv[3]);
+    const int n = std::stoi(argv[4]);
+    const std::size_t in_bytes = input.size() * sizeof(float);
+    const std::size_t a_bytes = static_cast<std::size_t>(split) * sizeof(float);
+    const std::size_t b_bytes =
+        static_cast<std::size_t>(n - split) * sizeof(float);
+    CUdeviceptr d_in = alloc_copy(input.data(), in_bytes);
+    CUdeviceptr d_a = 0;
+    CUdeviceptr d_b = 0;
+    cuMemAlloc(&d_a, a_bytes);
+    cuMemAlloc(&d_b, b_bytes);
+    int s = split;
+    int count = n;
+    std::vector<void *> params = {&d_in, &d_a, &d_b, &s, &count};
+    CUfunction f = load_function(SPLIT_PTX_PATH, "split");
+    if (!f || !launch_1d(f, params, n)) {
+      return 48;
+    }
+    std::vector<float> a(split);
+    std::vector<float> b(n - split);
+    cuMemcpyDtoH(a.data(), d_a, a_bytes);
+    cuMemcpyDtoH(b.data(), d_b, b_bytes);
+    a.insert(a.end(), b.begin(), b.end());
+    write_floats(out_path, a);
+    return 0;
+  }
+
+  if (mode == "argmax") {
+    if (argc != 5) {
+      return 49;
+    }
+    auto input = read_floats(argv[2]);
+    const int n = std::stoi(argv[3]);
+    CUdeviceptr d_in = alloc_copy(input.data(), input.size() * sizeof(float));
+    CUdeviceptr d_out = 0;
+    cuMemAlloc(&d_out, sizeof(float));
+    int count = n;
+    std::vector<void *> params = {&d_in, &d_out, &count};
+    CUfunction f = load_function(ARGMAX_PTX_PATH, "argmax");
+    if (!f || !launch_1d(f, params, 1, 1)) {
+      return 50;
+    }
+    float output = 0.0F;
+    cuMemcpyDtoH(&output, d_out, sizeof(output));
+    std::vector<float> result{output};
+    write_floats(out_path, result);
+    return 0;
+  }
+
+  if (mode == "clamp") {
+    if (argc != 7) {
+      return 51;
+    }
+    auto input = read_floats(argv[2]);
+    const float min_value = std::stof(argv[3]);
+    const float max_value = std::stof(argv[4]);
+    const int n = std::stoi(argv[5]);
+    const std::size_t bytes = input.size() * sizeof(float);
+    CUdeviceptr d_in = alloc_copy(input.data(), bytes);
+    CUdeviceptr d_out = 0;
+    cuMemAlloc(&d_out, bytes);
+    int count = n;
+    float mn = min_value;
+    float mx = max_value;
+    std::vector<void *> params = {&d_in, &d_out, &mn, &mx, &count};
+    CUfunction f = load_function(CLAMP_PTX_PATH, "clamp");
+    if (!f || !launch_1d(f, params, n)) {
+      return 52;
+    }
+    std::vector<float> output(input.size());
+    cuMemcpyDtoH(output.data(), d_out, bytes);
+    write_floats(out_path, output);
+    return 0;
+  }
+
+  if (mode == "neg" || mode == "square") {
+    if (argc != 5) {
+      return 53;
+    }
+    auto input = read_floats(argv[2]);
+    const int n = std::stoi(argv[3]);
+    const std::size_t bytes = input.size() * sizeof(float);
+    CUdeviceptr d_in = alloc_copy(input.data(), bytes);
+    CUdeviceptr d_out = 0;
+    cuMemAlloc(&d_out, bytes);
+    int count = n;
+    std::vector<void *> params = {&d_in, &d_out, &count};
+    const std::string ptx = mode == "neg" ? NEG_PTX_PATH : SQUARE_PTX_PATH;
+    const std::string name = mode == "neg" ? "neg" : "square";
+    CUfunction f = load_function(ptx, name);
+    if (!f || !launch_1d(f, params, n)) {
+      return 54;
+    }
+    std::vector<float> output(input.size());
+    cuMemcpyDtoH(output.data(), d_out, bytes);
+    write_floats(out_path, output);
+    return 0;
+  }
+
+  if (mode == "log_softmax") {
+    if (argc != 6) {
+      return 55;
+    }
+    auto input = read_floats(argv[2]);
+    const int rows = std::stoi(argv[3]);
+    const int cols = std::stoi(argv[4]);
+    const std::size_t bytes = input.size() * sizeof(float);
+    CUdeviceptr d_in = alloc_copy(input.data(), bytes);
+    CUdeviceptr d_out = 0;
+    cuMemAlloc(&d_out, bytes);
+    int r = rows;
+    int c = cols;
+    std::vector<void *> params = {&d_in, &d_out, &r, &c};
+    CUfunction f = load_function(LOG_SOFTMAX_PTX_PATH, "log_softmax");
+    if (!f || !launch_1d(f, params, rows, 1)) {
+      return 56;
+    }
+    std::vector<float> output(input.size());
+    cuMemcpyDtoH(output.data(), d_out, bytes);
+    write_floats(out_path, output);
+    return 0;
+  }
+
+  if (mode == "cross_entropy") {
+    if (argc != 7) {
+      return 57;
+    }
+    auto logits = read_floats(argv[2]);
+    auto targets = read_ints(argv[3]);
+    const int batch = std::stoi(argv[4]);
+    const int classes = std::stoi(argv[5]);
+    const std::size_t logits_bytes = logits.size() * sizeof(float);
+    CUdeviceptr d_logits = alloc_copy(logits.data(), logits_bytes);
+    CUdeviceptr d_targets =
+        alloc_copy(targets.data(), targets.size() * sizeof(int));
+    CUdeviceptr d_out = 0;
+    cuMemAlloc(&d_out, static_cast<std::size_t>(batch) * sizeof(float));
+    int b = batch;
+    int c = classes;
+    std::vector<void *> params = {&d_logits, &d_targets, &d_out, &b, &c};
+    CUfunction f = load_function(CROSS_ENTROPY_PTX_PATH, "cross_entropy");
+    if (!f || !launch_1d(f, params, batch, 1)) {
+      return 58;
+    }
+    std::vector<float> output(static_cast<std::size_t>(batch));
+    cuMemcpyDtoH(output.data(), d_out, output.size() * sizeof(float));
+    write_floats(out_path, output);
+    return 0;
+  }
+
+  if (mode == "sigmoid" || mode == "tanh" || mode == "silu" ||
+      mode == "reciprocal") {
+    if (argc != 5) {
+      return 59;
+    }
+    auto input = read_floats(argv[2]);
+    const int n = std::stoi(argv[3]);
+    const std::size_t bytes = input.size() * sizeof(float);
+    CUdeviceptr d_in = alloc_copy(input.data(), bytes);
+    CUdeviceptr d_out = 0;
+    cuMemAlloc(&d_out, bytes);
+    int count = n;
+    std::vector<void *> params = {&d_in, &d_out, &count};
+    std::string ptx;
+    std::string name;
+    if (mode == "sigmoid") {
+      ptx = SIGMOID_PTX_PATH;
+      name = "sigmoid";
+    } else if (mode == "tanh") {
+      ptx = TANH_PTX_PATH;
+      name = "tanh_kernel";
+    } else if (mode == "silu") {
+      ptx = SILU_PTX_PATH;
+      name = "silu";
+    } else {
+      ptx = RECIPROCAL_PTX_PATH;
+      name = "reciprocal";
+    }
+    CUfunction f = load_function(ptx, name);
+    if (!f || !launch_1d(f, params, n)) {
+      return 60;
     }
     std::vector<float> output(input.size());
     cuMemcpyDtoH(output.data(), d_out, bytes);

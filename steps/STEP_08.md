@@ -339,6 +339,22 @@ Comparison requirements:
 - files: `tests/kernels/*.cu`, `src/exec/executor.cpp`, `tests/reference/gpu_reference_runner.cu`, `tests/reference/run_gpu_reference.py`, `tests/CMakeLists.txt`
 - verification: `make test` is green with the expanded real-GPU operator harness.
 
+- Added `concat`, `split`, `argmax`, and `clamp` kernels. Added `or.b32`, `setp.gt.f32`, and `selp.b32`.
+- files: `tests/kernels/*.cu`, `src/exec/executor.cpp`, `tests/reference/gpu_reference_runner.cu`, `tests/reference/run_gpu_reference.py`, `tests/CMakeLists.txt`
+- verification: `make test` is green with the expanded real-GPU operator harness.
+
+- Added `neg`, `square`, `log_softmax`, and `cross_entropy` kernels.
+- files: `tests/kernels/*.cu`, `tests/reference/gpu_reference_runner.cu`, `tests/reference/run_gpu_reference.py`, `tests/CMakeLists.txt`
+- verification: `make test` is green with the expanded real-GPU operator harness.
+
+- Added `tanh` and `reciprocal` kernels and enabled them in the harness. Added `rcp.rn.f32` and immediate support in `fma.rn/rm.f32`.
+- files: `tests/kernels/*.cu`, `src/exec/executor.cpp`, `tests/reference/gpu_reference_runner.cu`, `tests/reference/run_gpu_reference.py`, `tests/CMakeLists.txt`
+- verification: `make test` is green.
+
+- Enabled `sigmoid` and `silu` with their normal exp-based implementations. Fixed `cvt.sat.f32.f32` to clamp to `[0, 1]` and `fma.rn/rm.f32` to use `std::fmaf`, which makes the NVVM exp/reciprocal bit-trick path match the GPU.
+- files: `tests/kernels/sigmoid.cu`, `tests/kernels/silu.cu`, `src/exec/executor.cpp`
+- verification: `make test` is green with `sigmoid` and `silu` enabled.
+
 ## Verification
 
 Commands run:
