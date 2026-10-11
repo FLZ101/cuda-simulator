@@ -451,25 +451,34 @@ Comparison requirements:
 - verification: `ctest --test-dir build -R kernels.gpu_reference_differential_attention`
   passes, and the full 26-test CTest suite is green.
 
+- Added the detection operator group (`nms`, `iou`, `ciou`, `roi_align`,
+  `box_decode`, `box_encode`) and the sequence operator group (`rnn_cell`,
+  `lstm_cell`, `gru_cell`, `sequence_mask`, `beam_search`, `ctc_decode`).
+- files: `tests/kernels/detection/*.cu`, `tests/kernels/sequence/*.cu`,
+  `tests/CMakeLists.txt`, `tests/reference/run_gpu_reference.py`
+- verification: both new group tests pass independently; the full CTest suite
+  is green with 28 tests.
+
 ## Verification
 
 Commands run:
 
 ```bash
 cmake --build build -j 4
-ctest --test-dir build -R kernels.gpu_reference_differential_attention --output-on-failure
+ctest --test-dir build -R kernels.gpu_reference_differential_detection --output-on-failure
+ctest --test-dir build -R kernels.gpu_reference_differential_sequence --output-on-failure
 ctest --test-dir build --output-on-failure
 ```
 
 Result:
 
 ```text
-100% tests passed, 0 tests failed out of 26
+100% tests passed, 0 tests failed out of 28
 ```
 
 Required before Step 9:
 
-- All nine operator-group differential tests pass against the real GPU.
+- All eleven operator-group differential tests pass against the real GPU.
 - The remaining Step 8 work is the simple PyTorch-generated model CPU-reference
   flow, which is exercised again for full ResNet/GPT-2 models in Steps 9/10.
 

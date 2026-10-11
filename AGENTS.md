@@ -57,60 +57,61 @@ adding a plan.
 
 ## Adding a new kernel/operator
 
-When adding a new CUDA operator to the generated-kernel corpus:
+Generated kernels are grouped under `tests/kernels/<group>/` and tested by the
+generic differential runner. For most new SIMT operators:
 
-1. Add the CUDA source:
+1. Pick an existing group or add the group to `KERNEL_GROUPS` in
+   `tests/CMakeLists.txt`.
+
+2. Add the CUDA source:
 
    ```text
-   tests/kernels/<operator>.cu
+   tests/kernels/<group>/<operator>.cu
    ```
 
-   Use:
+   Use the generic scalar signature:
 
    ```cuda
-   extern "C" __global__ void <operator>(...);
+   extern "C" __global__ void <operator>(
+       const float *a, const float *b, const float *c, const float *d,
+       const int *idx, float *out, int p0, int p1, int p2, int p3, int p4,
+       int p5, int p6, int p7, float f0, float f1, float f2, float f3);
    ```
 
-2. Add `<operator>` to `CLASSIC_KERNEL_NAMES` in `tests/CMakeLists.txt`.
+   `a`-`d` are optional float inputs, `idx` is an optional int input, `out` is
+   the output, `p0` is the output float count, and `p1`-`p7`/`f0`-`f3` carry
+   shape/algorithm parameters.
 
-3. Add a PTX path macro to the `gpu_reference_runner` target:
+3. Add `<operator>` to `KERNELS_<group>` in `tests/CMakeLists.txt`.
 
-   ```cmake
-   <OPERATOR>_PTX_PATH="${GENERATED_PTX_DIR}/<operator>.ptx"
+4. Add `<operator>` to `SUPPORTED_OPERATORS` and to the matching entry in
+   `OPERATOR_GROUPS` in `tests/reference/run_gpu_reference.py`.
+
+5. Add a deterministic case in `run_gpu_reference.py`:
+
+   ```python
+   run_pair("<operator>", generic_args(input_path, ints=(out_count, ...)))
    ```
 
-4. Add the matching generation dependency:
+6. If the PTX function name must differ from the mode name, extend
+   `generic_kernel_name` in `tests/reference/gpu_reference_runner.cu`.
 
-   ```cmake
-   generate_<operator>_ptx
-   ```
-
-5. Add a dispatch branch in `tests/reference/gpu_reference_runner.cu` that:
-
-   - reads deterministic input files
-   - allocates/copies device memory
-   - loads the PTX function
-   - launches the kernel
-   - copies the result back
-   - writes the raw output file
-
-6. Add the operator to `SUPPORTED_OPERATORS` in
-   `tests/reference/run_gpu_reference.py`.
-
-7. Add a deterministic `run_pair("<operator>", ...)` case with the expected
-   arguments and input files.
-
-8. Verify:
+7. Verify the group first, then the full suite:
 
    ```bash
    cmake --build build -j
+   ctest --test-dir build -R kernels.gpu_reference_differential_<group> --output-on-failure
+   ctest --test-dir build --output-on-failure
    make format-python
-   make test
    make precommit
    ```
 
-9. Record the work in `steps/STEP_08.md` and update `DESIGN.md` if this is a
-   new target operator category.
+8. Record the work in `steps/STEP_08.md` and update `DESIGN.md` if this is a
+   new operator category.
+
+Only use a custom dispatch branch in `tests/reference/gpu_reference_runner.cu`
+when the generic signature cannot represent the operator. Custom branches still
+need a generated PTX target and must use the real GPU as the golden reference.
 
 ## Step recording guide
 

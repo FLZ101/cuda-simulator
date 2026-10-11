@@ -224,6 +224,18 @@ SUPPORTED_OPERATORS = {
     "gated_mlp",
     "fused_rms_norm_linear",
     "fused_layer_norm_linear",
+    "nms",
+    "iou",
+    "ciou",
+    "roi_align",
+    "box_decode",
+    "box_encode",
+    "rnn_cell",
+    "lstm_cell",
+    "gru_cell",
+    "sequence_mask",
+    "beam_search",
+    "ctc_decode",
 }
 
 OPERATOR_GROUPS = {
@@ -458,6 +470,22 @@ OPERATOR_GROUPS = {
         "softmin",
         "softmax1d",
         "spatial_softmax",
+    },
+    "detection": {
+        "nms",
+        "iou",
+        "ciou",
+        "roi_align",
+        "box_decode",
+        "box_encode",
+    },
+    "sequence": {
+        "rnn_cell",
+        "lstm_cell",
+        "gru_cell",
+        "sequence_mask",
+        "beam_search",
+        "ctc_decode",
     },
 }
 
@@ -1269,6 +1297,252 @@ def main():
         run_pair("roll", generic_args(x_path, ints=(n, n, 4)))
         run_pair("flip", generic_args(x_path, ints=(n, n)))
         run_pair("rot90", generic_args(cnn_in_path, ints=(4 * 8, 4, 8)))
+
+        det_boxes1 = [
+            0.0,
+            0.0,
+            4.0,
+            4.0,
+            2.0,
+            2.0,
+            6.0,
+            6.0,
+            5.0,
+            1.0,
+            8.0,
+            5.0,
+            1.0,
+            1.0,
+            3.0,
+            3.0,
+        ]
+        det_boxes2 = [
+            1.0,
+            1.0,
+            5.0,
+            5.0,
+            0.0,
+            0.0,
+            4.0,
+            4.0,
+            6.0,
+            6.0,
+            9.0,
+            9.0,
+        ]
+        det_scores = [0.9, 0.7, 0.8, 0.6]
+        det_boxes1_path = os.path.join(tmp, "det_boxes1.bin")
+        det_boxes2_path = os.path.join(tmp, "det_boxes2.bin")
+        det_scores_path = os.path.join(tmp, "det_scores.bin")
+        write_floats(det_boxes1_path, det_boxes1)
+        write_floats(det_boxes2_path, det_boxes2)
+        write_floats(det_scores_path, det_scores)
+        run_pair(
+            "nms",
+            generic_args(
+                det_boxes1_path,
+                det_scores_path,
+                ints=(4, 4, 4),
+                floats=(0.5, 0.0, 0.0, 0.0),
+            ),
+        )
+        run_pair("iou", generic_args(det_boxes1_path, det_boxes2_path, ints=(12, 4, 3, 4)))
+        run_pair("ciou", generic_args(det_boxes1_path, det_boxes2_path, ints=(12, 4, 3, 4)))
+
+        det_feature = [float((i * 3) % 11) for i in range(4 * 4)]
+        det_feature_path = os.path.join(tmp, "det_feature.bin")
+        write_floats(det_feature_path, det_feature)
+        det_rois = [
+            0.0,
+            0.0,
+            1.0,
+            1.0,
+            0.25,
+            0.25,
+            0.75,
+            0.75,
+        ]
+        det_rois_path = os.path.join(tmp, "det_rois.bin")
+        write_floats(det_rois_path, det_rois)
+        run_pair(
+            "roi_align",
+            generic_args(
+                det_feature_path,
+                det_rois_path,
+                ints=(1 * 2 * 2 * 2, 1, 4, 4, 2, 2, 2),
+            ),
+        )
+
+        det_anchors = [
+            1.0,
+            1.0,
+            2.0,
+            2.0,
+            3.0,
+            2.0,
+            2.0,
+            3.0,
+            5.0,
+            5.0,
+            3.0,
+            2.0,
+            7.0,
+            3.0,
+            2.0,
+            4.0,
+        ]
+        det_deltas = [
+            0.0,
+            0.0,
+            0.1,
+            -0.1,
+            0.2,
+            -0.2,
+            0.0,
+            0.1,
+            -0.1,
+            0.1,
+            -0.2,
+            0.0,
+            0.0,
+            0.0,
+            0.1,
+            0.1,
+        ]
+        det_anchors_path = os.path.join(tmp, "det_anchors.bin")
+        det_deltas_path = os.path.join(tmp, "det_deltas.bin")
+        write_floats(det_anchors_path, det_anchors)
+        write_floats(det_deltas_path, det_deltas)
+        run_pair(
+            "box_decode",
+            generic_args(det_anchors_path, det_deltas_path, ints=(16, 4, 4)),
+        )
+        det_gt = [
+            0.0,
+            0.0,
+            3.0,
+            4.0,
+            2.0,
+            1.0,
+            6.0,
+            7.0,
+            4.0,
+            4.0,
+            9.0,
+            8.0,
+            6.0,
+            2.0,
+            10.0,
+            9.0,
+        ]
+        det_gt_path = os.path.join(tmp, "det_gt.bin")
+        write_floats(det_gt_path, det_gt)
+        run_pair(
+            "box_encode",
+            generic_args(det_boxes1_path, det_gt_path, ints=(16, 4, 4)),
+        )
+
+        seq_batch, seq_input, seq_hidden = 2, 4, 3
+        seq_x = [float((i % 5) - 2) for i in range(seq_batch * seq_input)]
+        seq_w_ih = [float((i * 3) % 7) / 7.0 for i in range(seq_input * seq_hidden)]
+        seq_w_hh = [float((i * 5) % 6) / 6.0 for i in range(seq_hidden * seq_hidden)]
+        seq_prev_h = [float((i % 4) - 1) for i in range(seq_batch * seq_hidden)]
+        seq_x_path = os.path.join(tmp, "seq_x.bin")
+        seq_w_ih_path = os.path.join(tmp, "seq_w_ih.bin")
+        seq_w_hh_path = os.path.join(tmp, "seq_w_hh.bin")
+        seq_prev_h_path = os.path.join(tmp, "seq_prev_h.bin")
+        write_floats(seq_x_path, seq_x)
+        write_floats(seq_w_ih_path, seq_w_ih)
+        write_floats(seq_w_hh_path, seq_w_hh)
+        write_floats(seq_prev_h_path, seq_prev_h)
+        run_pair(
+            "rnn_cell",
+            generic_args(
+                seq_x_path,
+                seq_w_ih_path,
+                seq_w_hh_path,
+                seq_prev_h_path,
+                ints=(seq_batch * seq_hidden, seq_batch, seq_input, seq_hidden),
+            ),
+        )
+
+        seq_w_ih_lstm = [float((i * 3) % 7) / 7.0 for i in range(4 * seq_hidden * seq_input)]
+        seq_w_hh_lstm = [float((i * 5) % 6) / 6.0 for i in range(4 * seq_hidden * seq_hidden)]
+        seq_prev_c = [0.05] * (seq_batch * seq_hidden)
+        seq_w_ih_lstm_path = os.path.join(tmp, "seq_w_ih_lstm.bin")
+        seq_w_hh_lstm_path = os.path.join(tmp, "seq_w_hh_lstm.bin")
+        seq_states_path = os.path.join(tmp, "seq_states.bin")
+        write_floats(seq_w_ih_lstm_path, seq_w_ih_lstm)
+        write_floats(seq_w_hh_lstm_path, seq_w_hh_lstm)
+        write_floats(seq_states_path, seq_prev_h + seq_prev_c)
+        run_pair(
+            "lstm_cell",
+            generic_args(
+                seq_x_path,
+                seq_w_ih_lstm_path,
+                seq_w_hh_lstm_path,
+                seq_states_path,
+                ints=(2 * seq_batch * seq_hidden, seq_batch, seq_input, seq_hidden),
+            ),
+        )
+
+        seq_w_ih_gru = [float((i * 3) % 7) / 7.0 for i in range(3 * seq_hidden * seq_input)]
+        seq_w_hh_gru = [float((i * 5) % 6) / 6.0 for i in range(3 * seq_hidden * seq_hidden)]
+        seq_w_ih_gru_path = os.path.join(tmp, "seq_w_ih_gru.bin")
+        seq_w_hh_gru_path = os.path.join(tmp, "seq_w_hh_gru.bin")
+        write_floats(seq_w_ih_gru_path, seq_w_ih_gru)
+        write_floats(seq_w_hh_gru_path, seq_w_hh_gru)
+        run_pair(
+            "gru_cell",
+            generic_args(
+                seq_x_path,
+                seq_w_ih_gru_path,
+                seq_w_hh_gru_path,
+                seq_prev_h_path,
+                ints=(seq_batch * seq_hidden, seq_batch, seq_input, seq_hidden),
+            ),
+        )
+
+        seq_lengths = [3, 5]
+        seq_lengths_path = os.path.join(tmp, "seq_lengths.bin")
+        write_ints(seq_lengths_path, seq_lengths)
+        run_pair(
+            "sequence_mask",
+            generic_args("-", "-", "-", "-", seq_lengths_path, ints=(12, 2, 6)),
+        )
+
+        beam_logits = [float((i * 7) % 13) for i in range(seq_batch * 8)]
+        beam_logits_path = os.path.join(tmp, "beam_logits.bin")
+        write_floats(beam_logits_path, beam_logits)
+        run_pair(
+            "beam_search",
+            generic_args(beam_logits_path, ints=(6, 2, 8, 3)),
+        )
+
+        ctc_vocab, ctc_time, ctc_max = 8, 5, 4
+        ctc_logits = [float((i * 5) % 11 - 5) for i in range(seq_batch * ctc_time * ctc_vocab)]
+        ctc_logits_path = os.path.join(tmp, "ctc_logits.bin")
+        write_floats(ctc_logits_path, ctc_logits)
+        run_pair(
+            "ctc_decode",
+            generic_args(
+                ctc_logits_path,
+                "-",
+                "-",
+                "-",
+                seq_lengths_path,
+                ints=(
+                    seq_batch * ctc_max,
+                    seq_batch,
+                    ctc_time,
+                    ctc_vocab,
+                    ctc_max,
+                    0,
+                    0,
+                    ctc_vocab - 1,
+                ),
+            ),
+        )
 
     print("operator kernels: PASS (supported subset)")
 

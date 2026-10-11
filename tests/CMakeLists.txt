@@ -40,6 +40,8 @@ set(KERNEL_GROUPS
   loss
   matrix
   misc
+  detection
+  sequence
 )
 
 set(KERNELS_elementwise
@@ -281,6 +283,24 @@ set(KERNELS_misc
   softmin
   softmax1d
   spatial_softmax
+)
+
+set(KERNELS_detection
+  nms
+  iou
+  ciou
+  roi_align
+  box_decode
+  box_encode
+)
+
+set(KERNELS_sequence
+  rnn_cell
+  lstm_cell
+  gru_cell
+  sequence_mask
+  beam_search
+  ctc_decode
 )
 
 add_custom_command(

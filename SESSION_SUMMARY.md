@@ -51,6 +51,8 @@ Enabled groups (each passes independently against the real GPU):
 - `loss`
 - `matrix`
 - `misc`
+- `detection`
+- `sequence`
 
 Legacy enabled-operator breakdown:
 
@@ -88,6 +90,9 @@ Scatter-add uses the PTX 8.x spelling `atom.global.add.f32`, which is handled
 as an alias of `atom.add.global.f32`.
 Attention kernels additionally required `setp.eq.s64`, `setp.ne.s64`,
 `abs.s32`, and `cos.approx.f32`.
+Detection adds `nms`, `iou`, `ciou`, `roi_align`, `box_decode`, and
+`box_encode`. Sequence adds `rnn_cell`, `lstm_cell`, `gru_cell`,
+`sequence_mask`, `beam_search`, and `ctc_decode`.
 
 ## Important Implementation Details
 

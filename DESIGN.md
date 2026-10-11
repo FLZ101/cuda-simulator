@@ -615,8 +615,9 @@ Current status:
   `steps/STEP_08.md`.
 - Step 8's `nvcc` operator execution qualification is implemented and green:
   generated kernels are grouped into operator families and tested through one
-  CTest target per group with the real GPU as golden reference. The remaining
-  Step 8 work is the simple PyTorch-generated model CPU-reference flow.
+  CTest target per group with the real GPU as golden reference, including
+  `detection` and `sequence` kernels. The remaining Step 8 work is the simple
+  PyTorch-generated model CPU-reference flow.
 
 ### Step 0: Build and Test Skeleton
 
