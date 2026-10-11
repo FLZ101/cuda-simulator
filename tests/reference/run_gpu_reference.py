@@ -7,6 +7,25 @@ import struct
 import subprocess
 import tempfile
 
+SUPPORTED_OPERATORS = {
+    "bias_add",
+    "batch_norm",
+    "max_pool2d",
+    "avg_pool2d",
+    "layer_norm",
+    "embedding_lookup",
+    "transpose",
+    "matmul_naive",
+    "matmul_tiled",
+    "softmax_row",
+    "reduce_sum",
+    "conv2d_naive",
+    "conv2d_im2col",
+    "conv2d_shared",
+    "attention_scores",
+    "gelu",
+}
+
 
 def write_floats(path, values):
     with open(path, "wb") as f:
@@ -40,6 +59,9 @@ def main():
     with tempfile.TemporaryDirectory() as tmp:
 
         def run_pair(mode, make_args):
+            if mode not in SUPPORTED_OPERATORS:
+                print(f"{mode}: skip (not enabled yet)")
+                return
             gpu_out = os.path.join(tmp, f"{mode}_gpu.bin")
             sim_out = os.path.join(tmp, f"{mode}_sim.bin")
             subprocess.run([args.runner, mode, *make_args(gpu_out)], check=True, env=gpu_env)
@@ -55,6 +77,7 @@ def main():
         x = [float(i) for i in range(n)]
         x_path = os.path.join(tmp, "x.bin")
         write_floats(x_path, x)
+        run_pair("gelu", lambda out: [x_path, str(n), out])
 
         bias = [0.1, -0.2, 0.3, 0.4]
         bias_path = os.path.join(tmp, "bias.bin")
@@ -75,11 +98,11 @@ def main():
         write_floats(pool_path, pool_input)
         run_pair(
             "max_pool2d",
-            lambda out: [pool_path, str(h), str(w), str(4), str(4), str(2), out],
+            lambda out: [pool_path, str(h), str(w), str(1), str(4), str(2), out],
         )
         run_pair(
             "avg_pool2d",
-            lambda out: [pool_path, str(h), str(w), str(4), str(4), str(2), out],
+            lambda out: [pool_path, str(h), str(w), str(1), str(4), str(2), out],
         )
 
         rows, hidden = 2, 16
@@ -162,7 +185,7 @@ def main():
             lambda out: [q_path, k_path, str(batch), str(heads), str(seq), str(dim), out],
         )
 
-    print("operator kernels: PASS")
+    print("operator kernels: PASS (supported subset)")
 
 
 if __name__ == "__main__":

@@ -1,4 +1,4 @@
-#include "compat/cuda_api.h"
+#include <cuda.h>
 
 #include <fstream>
 #include <sstream>
@@ -22,6 +22,21 @@ CUresult cuLaunchKernel(CUfunction function, unsigned int grid_x,
 }
 
 namespace {
+
+bool initialize_cuda() {
+  if (cuInit(0) != CUDA_SUCCESS) {
+    return false;
+  }
+  CUdevice device = 0;
+  if (cuDeviceGet(&device, 0) != CUDA_SUCCESS) {
+    return false;
+  }
+  CUcontext context = nullptr;
+  if (cuDevicePrimaryCtxRetain(&context, device) != CUDA_SUCCESS) {
+    return false;
+  }
+  return cuCtxSetCurrent(context) == CUDA_SUCCESS;
+}
 
 std::vector<float> read_floats(const std::string &path) {
   std::ifstream input(path, std::ios::binary);
@@ -58,15 +73,16 @@ CUfunction load_function(const std::string &ptx_path, const std::string &name) {
   buffer << ptx_input.rdbuf();
   const std::string ptx = buffer.str();
 
-  if (cuInit(0) != CUDA_SUCCESS) {
-    return nullptr;
-  }
   CUmodule module = nullptr;
   if (cuModuleLoadData(&module, ptx.c_str()) != CUDA_SUCCESS) {
     return nullptr;
   }
+  static std::vector<std::string> function_names;
+  function_names.push_back(name);
+  const std::string &stable_name = function_names.back();
   CUfunction function = nullptr;
-  if (cuModuleGetFunction(&function, module, name.c_str()) != CUDA_SUCCESS) {
+  if (cuModuleGetFunction(&function, module, stable_name.c_str()) !=
+      CUDA_SUCCESS) {
     return nullptr;
   }
   return function;
@@ -95,6 +111,18 @@ bool launch_1d(CUfunction function, const std::vector<void *> &params, int n,
                         nullptr) == CUDA_SUCCESS;
 }
 
+bool launch_1d_shared(CUfunction function,
+                      const std::vector<void *> &params, int n, int block,
+                      std::size_t shared_mem) {
+  const unsigned int blocks =
+      (static_cast<unsigned int>(n) + static_cast<unsigned int>(block) - 1) /
+      static_cast<unsigned int>(block);
+  return cuLaunchKernel(function, blocks, 1, 1,
+                        static_cast<unsigned int>(block), 1, 1, shared_mem,
+                        nullptr, const_cast<void **>(params.data()),
+                        nullptr) == CUDA_SUCCESS;
+}
+
 bool launch_2d(CUfunction function, const std::vector<void *> &params, int gx,
                int gy, int bx, int by) {
   return cuLaunchKernel(
@@ -109,6 +137,9 @@ bool launch_2d(CUfunction function, const std::vector<void *> &params, int gx,
 int main(int argc, char **argv) {
   if (argc < 2) {
     return 1;
+  }
+  if (!initialize_cuda()) {
+    return 25;
   }
 
   const std::string mode = argv[1];
@@ -316,9 +347,7 @@ int main(int argc, char **argv) {
         mode == "matmul_naive" ? MATMUL_NAIVE_PTX_PATH : MATMUL_TILED_PTX_PATH;
     CUfunction f = load_function(ptx, name);
     const bool ok =
-        mode == "matmul_naive"
-            ? launch_2d(f, params, (n + 15) / 16, (m + 15) / 16, 16, 16)
-            : launch_2d(f, params, (n + 15) / 16, (m + 15) / 16, 16, 16);
+        launch_2d(f, params, (n + 15) / 16, (m + 15) / 16, 16, 16);
     if (!f || !ok) {
       return 15;
     }
@@ -366,7 +395,9 @@ int main(int argc, char **argv) {
     int count = n;
     std::vector<void *> params = {&d_in, &d_out, &count};
     CUfunction f = load_function(REDUCE_SUM_PTX_PATH, "reduce_sum");
-    if (!f || !launch_1d(f, params, n, block)) {
+    if (!f ||
+        !launch_1d_shared(f, params, n, block,
+                          static_cast<std::size_t>(block) * sizeof(float))) {
       return 19;
     }
     float output = 0.0F;
@@ -468,6 +499,28 @@ int main(int argc, char **argv) {
     }
     std::vector<float> output(out_count);
     cuMemcpyDtoH(output.data(), d_scores, out_count * sizeof(float));
+    write_floats(out_path, output);
+    return 0;
+  }
+
+  if (mode == "gelu") {
+    if (argc != 5) {
+      return 25;
+    }
+    auto input = read_floats(argv[2]);
+    const int n = std::stoi(argv[3]);
+    const std::size_t bytes = input.size() * sizeof(float);
+    CUdeviceptr d_in = alloc_copy(input.data(), bytes);
+    CUdeviceptr d_out = 0;
+    cuMemAlloc(&d_out, bytes);
+    int count = n;
+    std::vector<void *> params = {&d_in, &d_out, &count};
+    CUfunction f = load_function(GELU_PTX_PATH, "gelu");
+    if (!f || !launch_1d(f, params, n)) {
+      return 26;
+    }
+    std::vector<float> output(input.size());
+    cuMemcpyDtoH(output.data(), d_out, bytes);
     write_floats(out_path, output);
     return 0;
   }

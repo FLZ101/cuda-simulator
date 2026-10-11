@@ -305,6 +305,15 @@ CUDASIM_EXTERN_C CUDASIM_API CUresult cuMemFree(CUdeviceptr ptr) {
   return result(true, CUDA_SUCCESS);
 }
 
+CUDASIM_EXTERN_C CUDASIM_API CUresult cuMemAlloc_v2(CUdeviceptr *ptr,
+                                                    std::size_t size) {
+  return cuMemAlloc(ptr, size);
+}
+
+CUDASIM_EXTERN_C CUDASIM_API CUresult cuMemFree_v2(CUdeviceptr ptr) {
+  return cuMemFree(ptr);
+}
+
 CUDASIM_EXTERN_C CUDASIM_API CUresult cuMemAllocManaged(CUdeviceptr *ptr,
                                                         std::size_t size,
                                                         unsigned int flags) {
@@ -366,6 +375,18 @@ CUDASIM_EXTERN_C CUDASIM_API CUresult cuMemcpyDtoH(void *dst, CUdeviceptr src,
   }
   std::memcpy(dst, reinterpret_cast<const void *>(src), count);
   return result(true, CUDA_SUCCESS);
+}
+
+CUDASIM_EXTERN_C CUDASIM_API CUresult cuMemcpyHtoD_v2(CUdeviceptr dst,
+                                                      const void *src,
+                                                      std::size_t count) {
+  return cuMemcpyHtoD(dst, src, count);
+}
+
+CUDASIM_EXTERN_C CUDASIM_API CUresult cuMemcpyDtoH_v2(void *dst,
+                                                      CUdeviceptr src,
+                                                      std::size_t count) {
+  return cuMemcpyDtoH(dst, src, count);
 }
 
 CUDASIM_EXTERN_C CUDASIM_API CUresult cuMemcpyDtoD(CUdeviceptr dst,

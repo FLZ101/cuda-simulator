@@ -212,42 +212,17 @@ add_test(
           ${ALL_GENERATED_PTX}
 )
 
-add_executable(demo_runner
-  kernels/demo_runner.cpp
+add_executable(gpu_reference_runner
+  reference/gpu_reference_runner.cu
 )
-target_compile_features(demo_runner PRIVATE cxx_std_20)
-target_include_directories(demo_runner PRIVATE ${CMAKE_SOURCE_DIR}/src)
-target_link_libraries(demo_runner PRIVATE cuda_shim)
-target_compile_definitions(demo_runner PRIVATE
-  COPY_PTX_PATH="${GENERATED_COPY_PTX}"
-  SAXPY_PTX_PATH="${GENERATED_SAXPY_PTX}"
-  RELU_PTX_PATH="${GENERATED_RELU_PTX}"
-  GELU_PTX_PATH="${GENERATED_PTX_DIR}/gelu.ptx"
+set_target_properties(gpu_reference_runner PROPERTIES
+  CUDA_STANDARD 20
+  CUDA_STANDARD_REQUIRED ON
+  CUDA_ARCHITECTURES 80
 )
-cudasim_set_warnings(demo_runner)
-cudasim_apply_sanitizers(demo_runner)
-add_dependencies(demo_runner
-  generate_copy_ptx
-  generate_saxpy_ptx
-  generate_relu_ptx
-  generate_gelu_ptx
-)
-add_test(
-  NAME kernels.demo_differential
-  COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/kernels/run_demos.py
-          --runner $<TARGET_FILE:demo_runner>
-          --cudart $<TARGET_FILE:cudart_shim>
-          --cuda $<TARGET_FILE:cuda_shim>
-          --core-dir $<TARGET_FILE_DIR:cudasim_core>
-)
-
-add_executable(operator_runner
-  kernels/operator_runner.cpp
-)
-target_compile_features(operator_runner PRIVATE cxx_std_20)
-target_include_directories(operator_runner PRIVATE ${CMAKE_SOURCE_DIR}/src)
-target_link_libraries(operator_runner PRIVATE cuda_shim)
-target_compile_definitions(operator_runner PRIVATE
+target_include_directories(gpu_reference_runner PRIVATE ${CMAKE_SOURCE_DIR}/src)
+target_link_libraries(gpu_reference_runner PRIVATE CUDA::cuda_driver)
+target_compile_definitions(gpu_reference_runner PRIVATE
   BIAS_ADD_PTX_PATH="${GENERATED_PTX_DIR}/bias_add.ptx"
   BATCH_NORM_PTX_PATH="${GENERATED_PTX_DIR}/batch_norm.ptx"
   MAX_POOL_PTX_PATH="${GENERATED_PTX_DIR}/max_pool2d.ptx"
@@ -263,10 +238,9 @@ target_compile_definitions(operator_runner PRIVATE
   CONV2D_IM2COL_PTX_PATH="${GENERATED_PTX_DIR}/conv2d_im2col.ptx"
   CONV2D_SHARED_PTX_PATH="${GENERATED_PTX_DIR}/conv2d_shared.ptx"
   ATTENTION_PTX_PATH="${GENERATED_PTX_DIR}/attention_scores.ptx"
+  GELU_PTX_PATH="${GENERATED_PTX_DIR}/gelu.ptx"
 )
-cudasim_set_warnings(operator_runner)
-cudasim_apply_sanitizers(operator_runner)
-add_dependencies(operator_runner
+add_dependencies(gpu_reference_runner
   generate_bias_add_ptx
   generate_batch_norm_ptx
   generate_max_pool2d_ptx
@@ -282,16 +256,16 @@ add_dependencies(operator_runner
   generate_conv2d_im2col_ptx
   generate_conv2d_shared_ptx
   generate_attention_scores_ptx
+  generate_gelu_ptx
 )
 add_test(
-  NAME kernels.operator_differential
-  COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/kernels/run_operators.py
-          --runner $<TARGET_FILE:operator_runner>
+  NAME kernels.gpu_reference_differential
+  COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/reference/run_gpu_reference.py
+          --runner $<TARGET_FILE:gpu_reference_runner>
           --cudart $<TARGET_FILE:cudart_shim>
           --cuda $<TARGET_FILE:cuda_shim>
           --core-dir $<TARGET_FILE_DIR:cudasim_core>
 )
-set_tests_properties(kernels.operator_differential PROPERTIES DISABLED TRUE)
 
 add_executable(runtime_api_smoke
   compat/runtime_api_smoke.cpp

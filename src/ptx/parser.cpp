@@ -126,6 +126,20 @@ void Parser::parse_directive(Module &module) {
   }
 
   if (name == "visible" || name == "extern" || name == "weak") {
+    if (name == "extern" && current_.kind == TokenKind::Dot) {
+      consume();
+      const std::string qualifier =
+          expect(TokenKind::Identifier, "expected qualifier").text;
+      if (qualifier == "shared" || qualifier == "global" ||
+          qualifier == "const") {
+        module.variables.push_back(parse_variable(qualifier));
+        return;
+      }
+      if (qualifier == "entry" || qualifier == "func") {
+        module.functions.push_back(parse_function(module));
+        return;
+      }
+    }
     for (;;) {
       if (current_.kind == TokenKind::Dot) {
         consume();
@@ -289,7 +303,11 @@ VariableDecl Parser::parse_variable(const std::string &space) {
 
   if (current_.kind == TokenKind::LBracket) {
     consume();
-    variable.size = expect(TokenKind::Number, "expected array size").text;
+    if (current_.kind == TokenKind::RBracket) {
+      variable.size.clear();
+    } else {
+      variable.size = expect(TokenKind::Number, "expected array size").text;
+    }
     expect(TokenKind::RBracket, "expected ']'");
   }
 
