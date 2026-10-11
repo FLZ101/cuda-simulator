@@ -35,12 +35,58 @@ def relu_kernel(in_ptr, out_ptr, n, BLOCK: tl.constexpr):
     tl.store(out_ptr + offsets, tl.maximum(x, 0.0), mask=mask)
 
 
+@triton.jit
+def conv2d_kernel(
+    x_ptr,
+    w_ptr,
+    b_ptr,
+    out_ptr,
+    C: tl.constexpr,
+    H: tl.constexpr,
+    W: tl.constexpr,
+    K: tl.constexpr,
+    R: tl.constexpr,
+    S: tl.constexpr,
+    stride: tl.constexpr,
+    pad: tl.constexpr,
+):
+    pid = tl.program_id(0)
+    oh = tl.program_id(1)
+    ow = tl.program_id(2)
+    n = pid // K
+    k = pid % K
+    acc = tl.load(b_ptr + k)
+    out_h = (H + 2 * pad - R) // stride + 1
+    out_w = (W + 2 * pad - S) // stride + 1
+    for c in tl.range(0, C):
+        for r in tl.range(0, R):
+            for s in tl.range(0, S):
+                ih = oh * stride - pad + r
+                iw = ow * stride - pad + s
+                in_bounds = (ih >= 0) & (ih < H) & (iw >= 0) & (iw < W)
+                x = tl.load(
+                    x_ptr + ((n * C + c) * H + ih) * W + iw,
+                    mask=in_bounds,
+                    other=0.0,
+                )
+                w = tl.load(w_ptr + ((k * C + c) * R + r) * S + s)
+                acc += x * w
+    tl.store(
+        out_ptr + ((n * K + k) * out_h + oh) * out_w + ow,
+        acc,
+    )
+
+
 def add_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--module-file", required=True)
     parser.add_argument("--batch", type=int, default=4)
     parser.add_argument("--in-features", type=int, default=16)
     parser.add_argument("--hidden", type=int, default=32)
     parser.add_argument("--out-features", type=int, default=8)
+    parser.add_argument("--in-channels", type=int, default=3)
+    parser.add_argument("--out-channels", type=int, default=4)
+    parser.add_argument("--height", type=int, default=8)
+    parser.add_argument("--width", type=int, default=8)
     parser.add_argument("--block", type=int, default=32)
 
 
@@ -106,6 +152,15 @@ def _relu_nodes(traced):
             yield node, module
 
 
+def _weighted_nodes(traced):
+    for node in traced.graph.nodes:
+        if node.op != "call_module":
+            continue
+        module = traced.get_submodule(node.target)
+        if isinstance(module, (torch.nn.Linear, torch.nn.Conv2d)):
+            yield node, module
+
+
 def _predecessor_name(node):
     value = node.args[0]
     if not isinstance(value, torch.fx.Node):
@@ -127,6 +182,25 @@ def _shape_map(traced, example_input):
                 if len(input_shape) != 2:
                     raise RuntimeError(f"unsupported Linear input shape: {input_shape}")
                 shapes[node.name] = [input_shape[0], module.out_features]
+            elif isinstance(module, torch.nn.Conv2d):
+                if len(input_shape) != 4:
+                    raise RuntimeError(f"unsupported Conv2d input shape: {input_shape}")
+                kernel_h, kernel_w = module.kernel_size
+                stride_h, stride_w = module.stride
+                pad_h, pad_w = module.padding
+                dilation_h, dilation_w = module.dilation
+                out_h = (
+                    input_shape[2] + 2 * pad_h - dilation_h * (kernel_h - 1) - 1
+                ) // stride_h + 1
+                out_w = (
+                    input_shape[3] + 2 * pad_w - dilation_w * (kernel_w - 1) - 1
+                ) // stride_w + 1
+                shapes[node.name] = [
+                    input_shape[0],
+                    module.out_channels,
+                    out_h,
+                    out_w,
+                ]
             elif isinstance(module, torch.nn.ReLU):
                 shapes[node.name] = input_shape
             else:
@@ -151,6 +225,27 @@ def _graph_program(traced, shapes):
                     "input": input_name,
                     "in_features": module.in_features,
                     "out_features": module.out_features,
+                    "shape": shapes[node.name],
+                }
+            )
+        elif isinstance(module, torch.nn.Conv2d):
+            kernel_h, kernel_w = module.kernel_size
+            stride_h, stride_w = module.stride
+            pad_h, pad_w = module.padding
+            program.append(
+                {
+                    "kind": "conv2d",
+                    "name": node.name,
+                    "input": input_name,
+                    "in_channels": module.in_channels,
+                    "out_channels": module.out_channels,
+                    "kernel_h": kernel_h,
+                    "kernel_w": kernel_w,
+                    "stride_h": stride_h,
+                    "stride_w": stride_w,
+                    "pad_h": pad_h,
+                    "pad_w": pad_w,
+                    "input_shape": shapes[_predecessor_name(node)],
                     "shape": shapes[node.name],
                 }
             )
@@ -188,23 +283,23 @@ def run_cpu(args: argparse.Namespace, output_dir: pathlib.Path) -> None:
     _write_floats(output_dir / "cpu_output.bin", output)
 
     traced = _trace(model)
-    for index, (_, linear) in enumerate(_linear_nodes(traced)):
-        _write_floats(output_dir / f"weight{index}.bin", linear.weight)
-        if linear.bias is not None:
-            _write_floats(output_dir / f"bias{index}.bin", linear.bias)
+    for index, (_, module) in enumerate(_weighted_nodes(traced)):
+        _write_floats(output_dir / f"weight{index}.bin", module.weight)
+        if module.bias is not None:
+            _write_floats(output_dir / f"bias{index}.bin", module.bias)
 
 
 def native_arguments(args: argparse.Namespace, output_dir: pathlib.Path) -> list[str]:
     model, _ = _build_model(args)
     traced = _trace(model)
-    linears = list(_linear_nodes(traced))
+    weighted = list(_weighted_nodes(traced))
     arguments = [
         "--input",
         str(output_dir / "input.bin"),
         "--output",
         str(output_dir / "gpu_output.bin"),
     ]
-    for index, _ in enumerate(linears):
+    for index, _ in enumerate(weighted):
         arguments.extend(
             [
                 f"--weight{index}",
@@ -231,8 +326,16 @@ def _linear_index(linears, op):
     return next(index for index, candidate in enumerate(linears) if candidate is op)
 
 
+def _conv_index(convs, op):
+    return next(index for index, candidate in enumerate(convs) if candidate is op)
+
+
 def _relu_index(relus, op):
     return next(index for index, candidate in enumerate(relus) if candidate is op)
+
+
+def _weighted_index(weighted_ops, op):
+    return next(index for index, candidate in enumerate(weighted_ops) if candidate is op)
 
 
 def generate_native_runner(args: argparse.Namespace, output_path: pathlib.Path) -> None:
@@ -244,7 +347,9 @@ def generate_native_runner(args: argparse.Namespace, output_path: pathlib.Path) 
     shapes = _shape_map(traced, example_input)
     program = _graph_program(traced, shapes)
     linears = [op for op in program if op["kind"] == "linear"]
+    convs = [op for op in program if op["kind"] == "conv2d"]
     relus = [op for op in program if op["kind"] == "relu"]
+    weighted = [op for op in program if op["kind"] in ("linear", "conv2d")]
 
     ptx_by_key = {}
     for index, op in enumerate(linears):
@@ -263,6 +368,37 @@ def generate_native_runner(args: argparse.Namespace, output_path: pathlib.Path) 
         ).replace("linear_kernel", f"linear_{index}_kernel")
         ptx_by_key[f"linear_{index}"] = ptx
 
+    for index, op in enumerate(convs):
+        n, c, h, w = op["input_shape"]
+        k = op["out_channels"]
+        r = op["kernel_h"]
+        s = op["kernel_w"]
+        stride = op["stride_h"]
+        pad = op["pad_h"]
+        out_h = op["shape"][2]
+        out_w = op["shape"][3]
+        x = torch.randn(n, c, h, w, device="cuda", dtype=torch.float32)
+        weight = torch.randn(k, c, r, s, device="cuda", dtype=torch.float32)
+        bias = torch.randn(k, device="cuda", dtype=torch.float32)
+        out = torch.empty(n, k, out_h, out_w, device="cuda", dtype=torch.float32)
+        ptx = _compile_kernel(
+            conv2d_kernel,
+            (n * k, out_h, out_w),
+            (x, weight, bias, out),
+            {
+                "C": c,
+                "H": h,
+                "W": w,
+                "K": k,
+                "R": r,
+                "S": s,
+                "stride": stride,
+                "pad": pad,
+                "num_warps": 1,
+            },
+        ).replace("conv2d_kernel", f"conv2d_{index}_kernel")
+        ptx_by_key[f"conv2d_{index}"] = ptx
+
     for index, op in enumerate(relus):
         count = _numel(op["shape"])
         input_tensor = torch.empty(count, device="cuda", dtype=torch.float32)
@@ -276,10 +412,22 @@ def generate_native_runner(args: argparse.Namespace, output_path: pathlib.Path) 
         ptx_by_key[f"relu_{index}"] = ptx
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    output_path.write_text(_generate_cpp(args, traced, program, linears, relus, shapes, ptx_by_key))
+    output_path.write_text(
+        _generate_cpp(
+            args,
+            traced,
+            program,
+            linears,
+            convs,
+            relus,
+            weighted,
+            shapes,
+            ptx_by_key,
+        )
+    )
 
 
-def _generate_cpp(args, traced, program, linears, relus, shapes, ptx_by_key):
+def _generate_cpp(args, traced, program, linears, convs, relus, weighted, shapes, ptx_by_key):
     placeholder = next(node for node in traced.graph.nodes if node.op == "placeholder")
     output_node = next(node for node in traced.graph.nodes if node.op == "output")
     final_node = output_node.args[0]
@@ -290,6 +438,9 @@ def _generate_cpp(args, traced, program, linears, relus, shapes, ptx_by_key):
     for index, _ in enumerate(linears):
         function_loads.append(f"""  CUfunction linear{index}_fn = load_function(
       R"CUPTX({ptx_by_key[f"linear_{index}"]})CUPTX", "linear_{index}_kernel");""")
+    for index, _ in enumerate(convs):
+        function_loads.append(f"""  CUfunction conv{index}_fn = load_function(
+      R"CUPTX({ptx_by_key[f"conv2d_{index}"]})CUPTX", "conv2d_{index}_kernel");""")
     for index, _ in enumerate(relus):
         function_loads.append(f"""  CUfunction relu{index}_fn = load_function(
       R"CUPTX({ptx_by_key[f"relu_{index}"]})CUPTX", "relu_{index}_kernel");""")
@@ -297,6 +448,7 @@ def _generate_cpp(args, traced, program, linears, relus, shapes, ptx_by_key):
     check_functions = (
         " || ".join(
             [f"!linear{index}_fn" for index in range(len(linears))]
+            + [f"!conv{index}_fn" for index in range(len(convs))]
             + [f"!relu{index}_fn" for index in range(len(relus))]
         )
         or "false"
@@ -304,11 +456,11 @@ def _generate_cpp(args, traced, program, linears, relus, shapes, ptx_by_key):
 
     path_decls = "\n".join(
         f"  std::string weight{index}_path;\n  std::string bias{index}_path;"
-        for index in range(len(linears))
+        for index in range(len(weighted))
     )
 
     weight_arg_branches = []
-    for index, _ in enumerate(linears):
+    for index, _ in enumerate(weighted):
         weight_arg_branches.append(f"""    }} else if (arg == "--weight{index}" && i + 1 < argc) {{
       weight{index}_path = argv[++i];
     }} else if (arg == "--bias{index}" && i + 1 < argc) {{
@@ -316,11 +468,17 @@ def _generate_cpp(args, traced, program, linears, relus, shapes, ptx_by_key):
     arg_parser = "\n".join(weight_arg_branches)
 
     weight_reads = []
-    for index, op in enumerate(linears):
+    for index, op in enumerate(weighted):
+        if op["kind"] == "linear":
+            weight_count = op["out_features"] * op["in_features"]
+            bias_count = op["out_features"]
+        else:
+            weight_count = op["out_channels"] * op["in_channels"] * op["kernel_h"] * op["kernel_w"]
+            bias_count = op["out_channels"]
         weight_reads.append(f"""  const auto weight{index} = read_floats(weight{index}_path);
   const auto bias{index} = read_floats(bias{index}_path);
-  if (static_cast<int>(weight{index}.size()) != {op["out_features"]} * {op["in_features"]} ||
-      static_cast<int>(bias{index}.size()) != {op["out_features"]}) {{
+  if (static_cast<int>(weight{index}.size()) != {weight_count} ||
+      static_cast<int>(bias{index}.size()) != {bias_count}) {{
     return 3;
   }}""")
 
@@ -330,11 +488,11 @@ def _generate_cpp(args, traced, program, linears, relus, shapes, ptx_by_key):
                         weight{index}.size() * sizeof(float));
   CUdeviceptr d_bias{index} =
       allocate_and_copy(bias{index}.data(), bias{index}.size() * sizeof(float));"""
-        for index in range(len(linears))
+        for index in range(len(weighted))
     )
     alloc_guard_parts = ["!d_input"]
-    alloc_guard_parts.extend(f"!d_weight{index}" for index in range(len(linears)))
-    alloc_guard_parts.extend(f"!d_bias{index}" for index in range(len(linears)))
+    alloc_guard_parts.extend(f"!d_weight{index}" for index in range(len(weighted)))
+    alloc_guard_parts.extend(f"!d_bias{index}" for index in range(len(weighted)))
     alloc_guard = " ||\n      ".join(alloc_guard_parts)
 
     buffer_allocs = []
@@ -350,11 +508,28 @@ def _generate_cpp(args, traced, program, linears, relus, shapes, ptx_by_key):
         input_var = "d_input" if op["input"] == placeholder.name else _buffer_name(op["input"])
         output_var = _buffer_name(op["name"])
         if op["kind"] == "linear":
-            index = _linear_index(linears, op)
-            launches.append(f"""  if (!launch_linear(linear{index}_fn, {input_var},
-                     d_weight{index}, d_bias{index}, {output_var},
+            linear_index = _linear_index(linears, op)
+            weight_index = _weighted_index(weighted, op)
+            launches.append(f"""  if (!launch_linear(linear{linear_index}_fn, {input_var},
+                     d_weight{weight_index}, d_bias{weight_index}, {output_var},
                      {op["shape"][0]}, {op["out_features"]})) {{
     return 6;
+  }}""")
+        elif op["kind"] == "conv2d":
+            conv_index = _conv_index(convs, op)
+            weight_index = _weighted_index(weighted, op)
+            n, c, h, w = op["input_shape"]
+            k = op["out_channels"]
+            r = op["kernel_h"]
+            s = op["kernel_w"]
+            stride = op["stride_h"]
+            pad = op["pad_h"]
+            out_h = op["shape"][2]
+            out_w = op["shape"][3]
+            launches.append(f"""  if (!launch_conv(conv{conv_index}_fn, {input_var},
+                   d_weight{weight_index}, d_bias{weight_index}, {output_var},
+                   {n}, {k}, {out_h}, {out_w})) {{
+    return 8;
   }}""")
         else:
             index = _relu_index(relus, op)
@@ -374,6 +549,31 @@ def _generate_cpp(args, traced, program, linears, relus, shapes, ptx_by_key):
     final_var = _buffer_name(final_node.name)
     final_count = _numel(shapes[final_node.name])
     placeholder_count = _numel(shapes[placeholder.name])
+
+    launch_helpers = []
+    if linears:
+        launch_helpers.append(
+            """bool launch_linear(CUfunction function, CUdeviceptr x, CUdeviceptr w,
+                   CUdeviceptr b, CUdeviceptr out, int m, int n) {
+  CUdeviceptr scratch = 0;
+  void *params[] = {&x, &w, &b, &out, &m, &n, &scratch};
+  return check(cuLaunchKernel(function, static_cast<unsigned int>(m),
+                              static_cast<unsigned int>(n), 1, 32, 1, 1, 0,
+                              nullptr, params, nullptr));
+}"""
+        )
+    if convs:
+        launch_helpers.append("""bool launch_conv(CUfunction function, CUdeviceptr x, CUdeviceptr w,
+                 CUdeviceptr b, CUdeviceptr out, int n, int k, int out_h,
+                 int out_w) {
+  CUdeviceptr scratch = 0;
+  void *params[] = {&x, &w, &b, &out, &scratch};
+  return check(cuLaunchKernel(function, static_cast<unsigned int>(n * k),
+                              static_cast<unsigned int>(out_h),
+                              static_cast<unsigned int>(out_w), 32, 1, 1, 0,
+                              nullptr, params, nullptr));
+}""")
+    launch_helpers_text = "\n".join(launch_helpers)
 
     source = f"""#include <cuda.h>
 
@@ -441,14 +641,7 @@ CUdeviceptr allocate_and_copy(const void *data, std::size_t bytes) {{
   return ptr;
 }}
 
-bool launch_linear(CUfunction function, CUdeviceptr x, CUdeviceptr w,
-                   CUdeviceptr b, CUdeviceptr out, int m, int n) {{
-  CUdeviceptr scratch = 0;
-  void *params[] = {{&x, &w, &b, &out, &m, &n, &scratch}};
-  return check(cuLaunchKernel(function, static_cast<unsigned int>(m),
-                              static_cast<unsigned int>(n), 1, 32, 1, 1, 0,
-                              nullptr, params, nullptr));
-}}
+{launch_helpers_text}
 
 }} // namespace
 

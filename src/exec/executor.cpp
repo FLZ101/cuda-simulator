@@ -356,17 +356,25 @@ bool coalesced_global_f32(const FlatInstruction &instruction,
       ++pos;
     }
 
-    std::vector<const void *> addresses;
-    addresses.reserve(lanes.size());
+    std::vector<std::size_t> memory_lanes;
+    memory_lanes.reserve(lanes.size());
     for (const std::size_t lane : lanes) {
+      if (parse_predicate(instruction.predicate_tokens, registers, lane)) {
+        memory_lanes.push_back(lane);
+      }
+    }
+
+    std::vector<const void *> addresses;
+    addresses.reserve(memory_lanes.size());
+    for (const std::size_t lane : memory_lanes) {
       addresses.push_back(reinterpret_cast<const void *>(
           static_cast<std::uintptr_t>(registers.values[address->index][lane] +
                                       static_cast<std::uint64_t>(immediate))));
     }
     std::vector<std::uint32_t> values;
     cudasim::mem::coalesced_read_u32_pointers(addresses, values);
-    for (std::size_t i = 0; i < lanes.size(); ++i) {
-      registers.values[dst->index][lanes[i]] = values[i];
+    for (std::size_t i = 0; i < memory_lanes.size(); ++i) {
+      registers.values[dst->index][memory_lanes[i]] = values[i];
     }
     return true;
   }
@@ -417,11 +425,19 @@ bool coalesced_global_f32(const FlatInstruction &instruction,
     return false;
   }
 
+  std::vector<std::size_t> memory_lanes;
+  memory_lanes.reserve(lanes.size());
+  for (const std::size_t lane : lanes) {
+    if (parse_predicate(instruction.predicate_tokens, registers, lane)) {
+      memory_lanes.push_back(lane);
+    }
+  }
+
   std::vector<void *> addresses;
   std::vector<std::uint32_t> values;
-  addresses.reserve(lanes.size());
-  values.reserve(lanes.size());
-  for (const std::size_t lane : lanes) {
+  addresses.reserve(memory_lanes.size());
+  values.reserve(memory_lanes.size());
+  for (const std::size_t lane : memory_lanes) {
     addresses.push_back(reinterpret_cast<void *>(
         static_cast<std::uintptr_t>(registers.values[address->index][lane] +
                                     static_cast<std::uint64_t>(immediate))));
@@ -443,10 +459,6 @@ bool execute_instruction(
     const std::unordered_map<std::string, std::size_t> &labels) {
   const std::string &opcode = instruction.opcode;
 
-  if (opcode == "ret" || opcode == "exit") {
-    return false;
-  }
-
   if (opcode == "bra" || opcode == "bra.uni") {
     if (!parse_predicate(instruction.predicate_tokens, registers, lane)) {
       next_pc = pc + 1;
@@ -466,6 +478,15 @@ bool execute_instruction(
       next_pc = pc + 1;
     }
     return true;
+  }
+
+  if (!parse_predicate(instruction.predicate_tokens, registers, lane)) {
+    next_pc = pc + 1;
+    return true;
+  }
+
+  if (opcode == "ret" || opcode == "exit") {
+    return false;
   }
 
   if (opcode == "ld.param.u64" || opcode == "ld.param.u32" ||

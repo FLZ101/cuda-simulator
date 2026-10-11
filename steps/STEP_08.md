@@ -36,6 +36,7 @@ tests/models/specs/matmul.py
 tests/models/specs/mlp.py
 tests/models/specs/module.py
 tests/models/fixtures/mlp_module.py
+tests/models/fixtures/conv_module.py
 ```
 
 ## Acceptance Checks
@@ -523,6 +524,18 @@ Comparison requirements:
 - verification: `models.module.runner_cpu`, `models.module.runner_sim`, all
   eight `models.*.runner_*` tests, and the full 36-test CTest suite pass.
 
+- Extended the traced-module runner to lower `nn.Conv2d` as well. The Conv2d
+  Triton kernel uses predicated global loads for zero padding, which exposed
+  predicated `ld.global.*`/`st.global.*` semantics missing from the executor.
+  Predicated scalar and coalesced global accesses now skip non-predicated lanes
+  instead of reading or writing them.
+- files: `tests/models/specs/module.py`,
+  `tests/models/fixtures/conv_module.py`, `tests/CMakeLists.txt`,
+  `src/exec/executor.cpp`
+- verification: `models.conv_module.runner_cpu`,
+  `models.conv_module.runner_sim`, all ten `models.*.runner_*` tests, and the
+  full 38-test CTest suite pass.
+
 ## Verification
 
 Commands run:
@@ -531,14 +544,14 @@ Commands run:
 cmake --build build -j 4
 ctest --test-dir build -R kernels.gpu_reference_differential_detection --output-on-failure
 ctest --test-dir build -R kernels.gpu_reference_differential_sequence --output-on-failure
-ctest --test-dir build -R 'models\.(vector_add|matmul|mlp|module)\.runner_(cpu|sim)' --output-on-failure
+ctest --test-dir build -R 'models\.(vector_add|matmul|mlp|module|conv_module)\.runner_(cpu|sim)' --output-on-failure
 ctest --test-dir build --output-on-failure
 ```
 
 Result:
 
 ```text
-100% tests passed, 0 tests failed out of 36
+100% tests passed, 0 tests failed out of 38
 ```
 
 Required before Step 9:

@@ -158,6 +158,7 @@ bank, so generated indices such as `r716` do not alias `rd` or `f` registers.
 - `tests/models/specs/mlp.py`
 - `tests/models/specs/module.py`
 - `tests/models/fixtures/mlp_module.py`
+- `tests/models/fixtures/conv_module.py`
 - `tests/CMakeLists.txt`
 
 ## Next Steps
