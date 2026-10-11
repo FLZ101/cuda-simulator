@@ -159,7 +159,7 @@ std::string generic_kernel_name(const std::string &mode) {
       mode == "erfinv" || mode == "sinc" ||
       mode == "lgamma" || mode == "digamma" || mode == "fmod" ||
       mode == "remainder" || mode == "nextafter" || mode == "isfinite" ||
-      mode == "isinf" || mode == "isnan") {
+      mode == "isinf" || mode == "isnan" || mode == "norm") {
     return mode + "_kernel";
   }
   return mode;
