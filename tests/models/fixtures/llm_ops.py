@@ -12,7 +12,9 @@ class Residual(torch.nn.Module):
     def forward(self, x):
         hidden = self.gelu(self.linear(self.norm(x)))
         residual = (hidden + x) * x
-        return self.softmax(torch.cat([residual, hidden], dim=-1))
+        joined = torch.cat([residual, hidden], dim=-1)
+        scores = torch.matmul(joined, joined.transpose(-1, -2))
+        return self.softmax(scores)
 
 
 def build_model(args):

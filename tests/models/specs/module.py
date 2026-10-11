@@ -299,6 +299,41 @@ def concat_last_kernel(
 
 
 @triton.jit
+def transpose_kernel(
+    x_ptr,
+    out_ptr,
+    M: tl.constexpr,
+    N: tl.constexpr,
+    BLOCK: tl.constexpr,
+):
+    pid = tl.program_id(0)
+    offsets = pid * BLOCK + tl.arange(0, BLOCK)
+    mask = offsets < M * N
+    row = offsets // N
+    col = offsets % N
+    x = tl.load(x_ptr + offsets, mask=mask)
+    tl.store(out_ptr + col * M + row, x, mask=mask)
+
+
+@triton.jit
+def matmul_kernel(
+    a_ptr,
+    b_ptr,
+    out_ptr,
+    K: tl.constexpr,
+    N: tl.constexpr,
+):
+    row = tl.program_id(0)
+    col = tl.program_id(1)
+    acc = 0.0
+    for kk in tl.range(0, K):
+        a = tl.load(a_ptr + row * K + kk)
+        b = tl.load(b_ptr + kk * N + col)
+        acc += a * b
+    tl.store(out_ptr + row * N + col, acc)
+
+
+@triton.jit
 def layernorm_kernel(
     x_ptr,
     weight_ptr,
@@ -641,6 +676,15 @@ def _cat_dim(node):
     return 0
 
 
+def _transpose_dims(node):
+    if len(node.args) < 3:
+        raise RuntimeError(f"unsupported transpose call: {node.name}")
+    dim0, dim1 = node.args[1], node.args[2]
+    if not isinstance(dim0, int) or not isinstance(dim1, int):
+        raise RuntimeError(f"unsupported transpose dims for {node.name}")
+    return dim0, dim1
+
+
 def _shape_map(traced, example_input):
     shapes = {}
     for node in traced.graph.nodes:
@@ -800,6 +844,28 @@ def _shape_map(traced, example_input):
             if left_shape[:-1] != right_shape[:-1]:
                 raise RuntimeError(f"mismatched torch.cat shapes for {node.name}")
             shapes[node.name] = left_shape[:-1] + [left_shape[-1] + right_shape[-1]]
+        elif node.op == "call_function" and node.target is torch.matmul:
+            left_name, right_name = _binary_input_names(node)
+            left_shape = shapes[left_name]
+            right_shape = shapes[right_name]
+            if len(left_shape) != 2 or len(right_shape) != 2:
+                raise RuntimeError("only 2D torch.matmul is supported")
+            if left_shape[1] != right_shape[0]:
+                raise RuntimeError(f"mismatched torch.matmul shapes for {node.name}")
+            shapes[node.name] = [left_shape[0], right_shape[1]]
+        elif node.op == "call_method" and node.target == "transpose":
+            input_name = _predecessor_name(node)
+            input_shape = shapes[input_name]
+            if len(input_shape) != 2:
+                raise RuntimeError("only 2D transpose is supported")
+            dim0, dim1 = _transpose_dims(node)
+            if dim0 < 0:
+                dim0 += 2
+            if dim1 < 0:
+                dim1 += 2
+            if (dim0, dim1) not in ((0, 1), (1, 0)):
+                raise RuntimeError("only 2D row/column transpose is supported")
+            shapes[node.name] = [input_shape[1], input_shape[0]]
         else:
             raise RuntimeError(f"unsupported traced node: {node.op} {node.name}")
     return shapes
@@ -829,6 +895,28 @@ def _graph_program(traced, shapes):
                     "kind": "cat",
                     "name": node.name,
                     "inputs": (left_name, right_name),
+                    "shape": shapes[node.name],
+                }
+            )
+            continue
+        if node.op == "call_function" and node.target is torch.matmul:
+            left_name, right_name = _binary_input_names(node)
+            program.append(
+                {
+                    "kind": "matmul",
+                    "name": node.name,
+                    "inputs": (left_name, right_name),
+                    "shape": shapes[node.name],
+                }
+            )
+            continue
+        if node.op == "call_method" and node.target == "transpose":
+            input_name = _predecessor_name(node)
+            program.append(
+                {
+                    "kind": "transpose",
+                    "name": node.name,
+                    "input": input_name,
                     "shape": shapes[node.name],
                 }
             )
@@ -1178,6 +1266,14 @@ def _cat_index(cats, op):
     return next(index for index, candidate in enumerate(cats) if candidate is op)
 
 
+def _transpose_index(transposes, op):
+    return next(index for index, candidate in enumerate(transposes) if candidate is op)
+
+
+def _matmul_index(matmuls, op):
+    return next(index for index, candidate in enumerate(matmuls) if candidate is op)
+
+
 def _layer_norm_index(layer_norms, op):
     return next(index for index, candidate in enumerate(layer_norms) if candidate is op)
 
@@ -1210,6 +1306,8 @@ def generate_native_runner(args: argparse.Namespace, output_path: pathlib.Path) 
     adaptive_max_pools = [op for op in program if op["kind"] == "adaptive_maxpool2d"]
     binaries = [op for op in program if op["kind"] == "binary"]
     cats = [op for op in program if op["kind"] == "cat"]
+    transposes = [op for op in program if op["kind"] == "transpose"]
+    matmuls = [op for op in program if op["kind"] == "matmul"]
     layer_norms = [op for op in program if op["kind"] == "layernorm"]
     softmaxes = [op for op in program if op["kind"] == "softmax"]
     weighted = [op for op in program if op["kind"] in ("linear", "conv2d")]
@@ -1439,6 +1537,37 @@ def generate_native_runner(args: argparse.Namespace, output_path: pathlib.Path) 
         ).replace("concat_last_kernel", f"cat_{index}_kernel")
         ptx_by_key[f"cat_{index}"] = ptx
 
+    for index, op in enumerate(transposes):
+        input_shape = shapes[op["input"]]
+        m, n = input_shape
+        count = m * n
+        x = torch.empty(count, device="cuda", dtype=torch.float32)
+        out = torch.empty(count, device="cuda", dtype=torch.float32)
+        ptx = _compile_kernel(
+            transpose_kernel,
+            (1,),
+            (x, out),
+            {"M": m, "N": n, "BLOCK": args.block, "num_warps": 1},
+        ).replace("transpose_kernel", f"transpose_{index}_kernel")
+        ptx_by_key[f"transpose_{index}"] = ptx
+
+    for index, op in enumerate(matmuls):
+        left_shape = shapes[op["inputs"][0]]
+        right_shape = shapes[op["inputs"][1]]
+        m = left_shape[0]
+        k = left_shape[1]
+        n = right_shape[1]
+        a = torch.randn(m, k, device="cuda", dtype=torch.float32)
+        b = torch.randn(k, n, device="cuda", dtype=torch.float32)
+        out = torch.empty(m, n, device="cuda", dtype=torch.float32)
+        ptx = _compile_kernel(
+            matmul_kernel,
+            (m, n),
+            (a, b, out),
+            {"K": k, "N": n, "num_warps": 1},
+        ).replace("matmul_kernel", f"matmul_{index}_kernel")
+        ptx_by_key[f"matmul_{index}"] = ptx
+
     for index, op in enumerate(layer_norms):
         n = op["normalized_size"]
         count = _numel(op["shape"])
@@ -1485,6 +1614,8 @@ def generate_native_runner(args: argparse.Namespace, output_path: pathlib.Path) 
             adaptive_max_pools,
             binaries,
             cats,
+            transposes,
+            matmuls,
             layer_norms,
             softmaxes,
             weighted,
@@ -1510,6 +1641,8 @@ def _generate_cpp(
     adaptive_max_pools,
     binaries,
     cats,
+    transposes,
+    matmuls,
     layer_norms,
     softmaxes,
     weighted,
@@ -1563,6 +1696,12 @@ def _generate_cpp(
     for index, _ in enumerate(cats):
         function_loads.append(f"""  CUfunction cat{index}_fn = load_function(
       R"CUPTX({ptx_by_key[f"cat_{index}"]})CUPTX", "cat_{index}_kernel");""")
+    for index, _ in enumerate(transposes):
+        function_loads.append(f"""  CUfunction transpose{index}_fn = load_function(
+      R"CUPTX({ptx_by_key[f"transpose_{index}"]})CUPTX", "transpose_{index}_kernel");""")
+    for index, _ in enumerate(matmuls):
+        function_loads.append(f"""  CUfunction matmul{index}_fn = load_function(
+      R"CUPTX({ptx_by_key[f"matmul_{index}"]})CUPTX", "matmul_{index}_kernel");""")
     for index, _ in enumerate(layer_norms):
         function_loads.append(f"""  CUfunction layernorm{index}_fn = load_function(
       R"CUPTX({ptx_by_key[f"layernorm_{index}"]})CUPTX", "layernorm_{index}_kernel");""")
@@ -1584,6 +1723,8 @@ def _generate_cpp(
             + [f"!adaptive_maxpool{index}_fn" for index in range(len(adaptive_max_pools))]
             + [f"!binary{index}_fn" for index in range(len(binaries))]
             + [f"!cat{index}_fn" for index in range(len(cats))]
+            + [f"!transpose{index}_fn" for index in range(len(transposes))]
+            + [f"!matmul{index}_fn" for index in range(len(matmuls))]
             + [f"!layernorm{index}_fn" for index in range(len(layer_norms))]
             + [f"!softmax{index}_fn" for index in range(len(softmaxes))]
         )
@@ -1744,6 +1885,17 @@ def _generate_cpp(
     return 20;
   }}""")
             continue
+        if op["kind"] == "matmul":
+            matmul_index = _matmul_index(matmuls, op)
+            left_name, right_name = op["inputs"]
+            left_var = "d_input" if left_name == placeholder.name else _buffer_name(left_name)
+            right_var = "d_input" if right_name == placeholder.name else _buffer_name(right_name)
+            m, n = op["shape"]
+            launches.append(f"""  if (!launch_matmul(matmul{matmul_index}_fn, {left_var},
+                      {right_var}, {output_var}, {m}, {n})) {{
+    return 21;
+  }}""")
+            continue
         input_var = "d_input" if op["input"] == placeholder.name else _buffer_name(op["input"])
         if op["kind"] == "linear":
             linear_index = _linear_index(linears, op)
@@ -1842,6 +1994,13 @@ def _generate_cpp(
                          d_ln_weight{layer_norm_index}, d_ln_bias{layer_norm_index},
                          {output_var}, {count})) {{
     return 17;
+  }}""")
+        elif op["kind"] == "transpose":
+            transpose_index = _transpose_index(transposes, op)
+            count = _numel(op["shape"])
+            launches.append(f"""  if (!launch_transpose(transpose{transpose_index}_fn, {input_var},
+                         {output_var}, {count}, {args.block})) {{
+    return 22;
   }}""")
         elif op["kind"] == "softmax":
             softmax_index = _softmax_index(softmaxes, op)
@@ -1965,6 +2124,27 @@ def _generate_cpp(
       static_cast<unsigned int>(block);
   return check(cuLaunchKernel(function, grid, 1, 1,
                               static_cast<unsigned int>(block), 1, 1, 0,
+                              nullptr, params, nullptr));
+}""")
+    if transposes:
+        launch_helpers.append("""bool launch_transpose(CUfunction function, CUdeviceptr x,
+                       CUdeviceptr out, int count, int block) {
+  CUdeviceptr scratch = 0;
+  void *params[] = {&x, &out, &scratch};
+  const unsigned int grid =
+      (static_cast<unsigned int>(count) + static_cast<unsigned int>(block) - 1) /
+      static_cast<unsigned int>(block);
+  return check(cuLaunchKernel(function, grid, 1, 1,
+                              static_cast<unsigned int>(block), 1, 1, 0,
+                              nullptr, params, nullptr));
+}""")
+    if matmuls:
+        launch_helpers.append("""bool launch_matmul(CUfunction function, CUdeviceptr x,
+                   CUdeviceptr y, CUdeviceptr out, int m, int n) {
+  CUdeviceptr scratch = 0;
+  void *params[] = {&x, &y, &out, &scratch};
+  return check(cuLaunchKernel(function, static_cast<unsigned int>(m),
+                              static_cast<unsigned int>(n), 1, 32, 1, 1, 0,
                               nullptr, params, nullptr));
 }""")
     if layer_norms:

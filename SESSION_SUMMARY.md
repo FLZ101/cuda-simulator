@@ -33,7 +33,8 @@ and LLM-ops fixtures cover the generated execution paths.
 Additional activations include `nn.Hardswish`, `nn.Hardsigmoid`,
 `nn.ReLU6`, `nn.Softplus`, `nn.ELU`, `nn.SELU`, `nn.CELU`, `nn.Mish`,
 `nn.Hardtanh`, `nn.Softsign`, and `nn.LogSigmoid`; CNN/LLM helpers also cover
-`nn.AdaptiveMaxPool2d((1, 1))`, `nn.LogSoftmax`, and last-dim `torch.cat`.
+`nn.AdaptiveMaxPool2d((1, 1))`, `nn.LogSoftmax`, last-dim `torch.cat`,
+two-dimensional `torch.matmul`, and two-dimensional `Tensor.transpose`.
 
 Build:
 

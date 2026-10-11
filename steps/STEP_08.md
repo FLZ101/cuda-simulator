@@ -589,6 +589,15 @@ Comparison requirements:
 - verification: `models.cnn_ops.runner_cpu`, `models.cnn_ops.runner_sim`,
   `models.llm_ops.runner_cpu`, and `models.llm_ops.runner_sim` pass.
 
+- Added LLM attention-path graph operators to the traced-module converter:
+  two-dimensional `torch.matmul` and two-dimensional `Tensor.transpose`.
+  The LLM fixture now builds a square attention-score tensor before its final
+  softmax, covering `transpose -> matmul -> softmax`.
+- files: `tests/models/specs/module.py`,
+  `tests/models/fixtures/llm_ops.py`
+- verification: `models.llm_ops.runner_cpu` and
+  `models.llm_ops.runner_sim` pass.
+
 ## Verification
 
 Commands run:
