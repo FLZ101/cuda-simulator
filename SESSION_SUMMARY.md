@@ -25,8 +25,10 @@ embedded Triton PTX; `--mode cpu` runs the PyTorch model on CPU, while
 never takes PTX text as input.
 
 The traced-module spec currently lowers `nn.Linear`, `nn.Conv2d`, `nn.ReLU`,
-`nn.BatchNorm2d`, and `nn.MaxPool2d`; a ResNet-stem fixture covers the CNN
-sequence `Conv2d -> BatchNorm2d -> ReLU -> MaxPool2d`.
+`nn.BatchNorm2d`, `nn.MaxPool2d`, `nn.AvgPool2d`, `nn.AdaptiveAvgPool2d`,
+`nn.GELU`, `nn.SiLU`, `nn.Sigmoid`, `nn.Tanh`, `nn.LeakyReLU`, `nn.Flatten`,
+`nn.Dropout`, and `nn.Identity`. ResNet-stem and CNN-ops fixtures cover the
+generated execution paths.
 
 Build:
 
@@ -164,6 +166,7 @@ bank, so generated indices such as `r716` do not alias `rd` or `f` registers.
 - `tests/models/fixtures/mlp_module.py`
 - `tests/models/fixtures/conv_module.py`
 - `tests/models/fixtures/resnet_stem.py`
+- `tests/models/fixtures/cnn_ops.py`
 - `tests/ptx/scalar_math_kernel.ptx`
 - `tests/ptx/scalar_math_exec_smoke.cpp`
 - `tests/CMakeLists.txt`

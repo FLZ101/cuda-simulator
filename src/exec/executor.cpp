@@ -964,6 +964,45 @@ bool execute_instruction(
     return true;
   }
 
+  if (opcode == "or.b64" || opcode == "and.b64" || opcode == "xor.b64") {
+    std::size_t pos = 0;
+    auto dst = parse_register(instruction.operand_tokens, pos);
+    auto a = parse_register(instruction.operand_tokens, pos);
+    if (!dst || !a) {
+      return false;
+    }
+    while (pos < instruction.operand_tokens.size() &&
+           instruction.operand_tokens[pos].kind ==
+               cudasim::ptx::TokenKind::Comma) {
+      ++pos;
+    }
+    std::uint64_t bv = 0;
+    if (pos < instruction.operand_tokens.size() &&
+        instruction.operand_tokens[pos].kind ==
+            cudasim::ptx::TokenKind::Number) {
+      bv = static_cast<std::uint64_t>(
+          std::stoull(instruction.operand_tokens[pos].text));
+    } else {
+      auto b = parse_register(instruction.operand_tokens, pos);
+      if (!b) {
+        return false;
+      }
+      bv = registers.values[b->index][lane];
+    }
+    const std::uint64_t av = registers.values[a->index][lane];
+    std::uint64_t result = 0;
+    if (opcode == "or.b64") {
+      result = av | bv;
+    } else if (opcode == "and.b64") {
+      result = av & bv;
+    } else {
+      result = av ^ bv;
+    }
+    registers.values[dst->index][lane] = result;
+    next_pc = pc + 1;
+    return true;
+  }
+
   if (opcode == "ld.global.f32") {
     std::size_t pos = 0;
     auto dst = parse_register(instruction.operand_tokens, pos);
@@ -1105,7 +1144,7 @@ bool execute_instruction(
   }
 
   if (opcode == "fma.rn.f32" || opcode == "fma.rm.f32" ||
-      opcode == "fma.rz.f32") {
+      opcode == "fma.rz.f32" || opcode == "fma.rn.ftz.f32") {
     std::size_t pos = 0;
     auto dst = parse_register(instruction.operand_tokens, pos);
     auto a =
@@ -1577,7 +1616,9 @@ bool execute_instruction(
     return true;
   }
 
-  if (opcode == "setp.eq.s64" || opcode == "setp.ne.s64") {
+  if (opcode == "setp.eq.s64" || opcode == "setp.ne.s64" ||
+      opcode == "setp.lt.s64" || opcode == "setp.le.s64" ||
+      opcode == "setp.gt.s64" || opcode == "setp.ge.s64") {
     std::size_t pos = 0;
     if (pos >= instruction.operand_tokens.size() ||
         instruction.operand_tokens[pos].kind !=
@@ -1624,8 +1665,21 @@ bool execute_instruction(
       bv = registers.values[b->index][lane];
     }
     const std::uint64_t av = registers.values[a->index][lane];
-    registers.predicates[pred_index][lane] =
-        opcode == "setp.eq.s64" ? av == bv : av != bv;
+    const auto av_signed = static_cast<std::int64_t>(av);
+    const auto bv_signed = static_cast<std::int64_t>(bv);
+    if (opcode == "setp.eq.s64") {
+      registers.predicates[pred_index][lane] = av == bv;
+    } else if (opcode == "setp.ne.s64") {
+      registers.predicates[pred_index][lane] = av != bv;
+    } else if (opcode == "setp.lt.s64") {
+      registers.predicates[pred_index][lane] = av_signed < bv_signed;
+    } else if (opcode == "setp.le.s64") {
+      registers.predicates[pred_index][lane] = av_signed <= bv_signed;
+    } else if (opcode == "setp.gt.s64") {
+      registers.predicates[pred_index][lane] = av_signed > bv_signed;
+    } else {
+      registers.predicates[pred_index][lane] = av_signed >= bv_signed;
+    }
     next_pc = pc + 1;
     return true;
   }
@@ -1740,14 +1794,14 @@ bool execute_instruction(
 
   if (opcode == "neg.f32" || opcode == "cvt.sat.f32.f32" ||
       opcode == "ex2.approx.ftz.f32" || opcode == "ex2.approx.f32" ||
-      opcode == "abs.f32" || opcode == "cvt.rmi.f32.f32" ||
-      opcode == "cvt.rpi.f32.f32" || opcode == "cvt.rni.f32.f32" ||
-      opcode == "sin.approx.f32" || opcode == "cos.approx.f32" ||
-      opcode == "lg2.approx.f32" || opcode == "lg2.approx.ftz.f32" ||
-      opcode == "rcp.approx.ftz.f32" || opcode == "rcp.rn.f32" ||
-      opcode == "cvt.rzi.f32.f32" || opcode == "rsqrt.approx.f32" ||
-      opcode == "rsqrt.approx.ftz.f32" || opcode == "sqrt.approx.f32" ||
-      opcode == "sqrt.approx.ftz.f32") {
+      opcode == "abs.f32" || opcode == "abs.ftz.f32" ||
+      opcode == "cvt.rmi.f32.f32" || opcode == "cvt.rpi.f32.f32" ||
+      opcode == "cvt.rni.f32.f32" || opcode == "sin.approx.f32" ||
+      opcode == "cos.approx.f32" || opcode == "lg2.approx.f32" ||
+      opcode == "lg2.approx.ftz.f32" || opcode == "rcp.approx.ftz.f32" ||
+      opcode == "rcp.rn.f32" || opcode == "cvt.rzi.f32.f32" ||
+      opcode == "rsqrt.approx.f32" || opcode == "rsqrt.approx.ftz.f32" ||
+      opcode == "sqrt.approx.f32" || opcode == "sqrt.approx.ftz.f32") {
     std::size_t pos = 0;
     auto dst = parse_register(instruction.operand_tokens, pos);
     auto a =
@@ -1760,7 +1814,7 @@ bool execute_instruction(
       result = -*a;
     } else if (opcode == "cvt.sat.f32.f32") {
       result = std::clamp(*a, 0.0F, 1.0F);
-    } else if (opcode == "abs.f32") {
+    } else if (opcode == "abs.f32" || opcode == "abs.ftz.f32") {
       result = std::fabs(*a);
     } else if (opcode == "cvt.rmi.f32.f32") {
       result = std::floor(*a);

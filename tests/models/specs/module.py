@@ -139,6 +139,93 @@ def maxpool2d_kernel(
     )
 
 
+@triton.jit
+def copy_kernel(in_ptr, out_ptr, n, BLOCK: tl.constexpr):
+    pid = tl.program_id(0)
+    offsets = pid * BLOCK + tl.arange(0, BLOCK)
+    mask = offsets < n
+    x = tl.load(in_ptr + offsets, mask=mask)
+    tl.store(out_ptr + offsets, x, mask=mask)
+
+
+@triton.jit
+def activation_kernel(
+    in_ptr,
+    out_ptr,
+    n,
+    BLOCK: tl.constexpr,
+    mode: tl.constexpr,
+    negative_slope: tl.constexpr,
+):
+    pid = tl.program_id(0)
+    offsets = pid * BLOCK + tl.arange(0, BLOCK)
+    mask = offsets < n
+    x = tl.load(in_ptr + offsets, mask=mask)
+    if mode == 0:
+        y = 0.5 * x * (1.0 + tl.erf(x * 0.7071067811865476))
+    elif mode == 1:
+        y = x * tl.sigmoid(x)
+    elif mode == 2:
+        y = 1.0 / (1.0 + tl.exp(-x))
+    elif mode == 3:
+        y = 2.0 * tl.sigmoid(2.0 * x) - 1.0
+    else:
+        y = tl.where(x >= 0, x, negative_slope * x)
+    tl.store(out_ptr + offsets, y, mask=mask)
+
+
+@triton.jit
+def avgpool2d_kernel(
+    x_ptr,
+    out_ptr,
+    C: tl.constexpr,
+    H: tl.constexpr,
+    W: tl.constexpr,
+    KH: tl.constexpr,
+    KW: tl.constexpr,
+    stride: tl.constexpr,
+    pad: tl.constexpr,
+):
+    pid = tl.program_id(0)
+    oh = tl.program_id(1)
+    ow = tl.program_id(2)
+    n = pid // C
+    c = pid % C
+    out_h = (H + 2 * pad - KH) // stride + 1
+    out_w = (W + 2 * pad - KW) // stride + 1
+    acc = 0.0
+    for r in tl.range(0, KH):
+        for s in tl.range(0, KW):
+            ih = oh * stride - pad + r
+            iw = ow * stride - pad + s
+            in_bounds = (ih >= 0) & (ih < H) & (iw >= 0) & (iw < W)
+            value = tl.load(
+                x_ptr + ((n * C + c) * H + ih) * W + iw,
+                mask=in_bounds,
+                other=0.0,
+            )
+            acc += value
+    tl.store(
+        out_ptr + ((n * C + c) * out_h + oh) * out_w + ow,
+        acc / (KH * KW),
+    )
+
+
+@triton.jit
+def adaptive_avgpool2d_1x1_kernel(
+    x_ptr,
+    out_ptr,
+    H: tl.constexpr,
+    W: tl.constexpr,
+):
+    pid = tl.program_id(0)
+    acc = 0.0
+    for h in tl.range(0, H):
+        for w in tl.range(0, W):
+            acc += tl.load(x_ptr + pid * H * W + h * W + w)
+    tl.store(out_ptr + pid, acc / (H * W))
+
+
 def add_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--module-file", required=True)
     parser.add_argument("--batch", type=int, default=4)
@@ -241,6 +328,66 @@ def _max_pool_nodes(traced):
             yield node, module
 
 
+def _activation_nodes(traced):
+    activation_types = (
+        torch.nn.GELU,
+        torch.nn.SiLU,
+        torch.nn.Sigmoid,
+        torch.nn.Tanh,
+        torch.nn.LeakyReLU,
+    )
+    for node in traced.graph.nodes:
+        if node.op != "call_module":
+            continue
+        module = traced.get_submodule(node.target)
+        if isinstance(module, activation_types):
+            yield node, module
+
+
+def _copy_nodes(traced):
+    copy_types = (torch.nn.Dropout, torch.nn.Dropout2d, torch.nn.Identity, torch.nn.Flatten)
+    for node in traced.graph.nodes:
+        if node.op != "call_module":
+            continue
+        module = traced.get_submodule(node.target)
+        if isinstance(module, copy_types):
+            yield node, module
+
+
+def _avg_pool_nodes(traced):
+    for node in traced.graph.nodes:
+        if node.op != "call_module":
+            continue
+        module = traced.get_submodule(node.target)
+        if isinstance(module, torch.nn.AvgPool2d):
+            yield node, module
+
+
+def _adaptive_avg_pool_nodes(traced):
+    for node in traced.graph.nodes:
+        if node.op != "call_module":
+            continue
+        module = traced.get_submodule(node.target)
+        if isinstance(module, torch.nn.AdaptiveAvgPool2d):
+            yield node, module
+
+
+def _activation_mode(module):
+    if isinstance(module, torch.nn.GELU):
+        if not module.approximate == "none":
+            raise RuntimeError("only exact GELU is supported")
+        return 0, 0.0
+    if isinstance(module, torch.nn.SiLU):
+        return 1, 0.0
+    if isinstance(module, torch.nn.Sigmoid):
+        return 2, 0.0
+    if isinstance(module, torch.nn.Tanh):
+        return 3, 0.0
+    if isinstance(module, torch.nn.LeakyReLU):
+        return 4, module.negative_slope
+    raise RuntimeError(f"unsupported activation: {type(module).__name__}")
+
+
 def _square_pair(module, name):
     value = getattr(module, name)
     if isinstance(value, int):
@@ -338,6 +485,51 @@ def _shape_map(traced, example_input):
                 out_h = (input_shape[2] + 2 * pad_h - (kernel_h - 1) - 1) // stride_h + 1
                 out_w = (input_shape[3] + 2 * pad_w - (kernel_w - 1) - 1) // stride_w + 1
                 shapes[node.name] = [input_shape[0], input_shape[1], out_h, out_w]
+            elif isinstance(module, torch.nn.AvgPool2d):
+                if len(input_shape) != 4:
+                    raise RuntimeError(f"unsupported AvgPool2d input shape: {input_shape}")
+                if module.ceil_mode:
+                    raise RuntimeError("unsupported ceil_mode AvgPool2d")
+                if not module.count_include_pad:
+                    raise RuntimeError("unsupported AvgPool2d count_include_pad=False")
+                if module.divisor_override is not None:
+                    raise RuntimeError("unsupported AvgPool2d divisor_override")
+                kernel_h = _square_pair(module, "kernel_size")
+                kernel_w = kernel_h
+                stride_h = _square_pair(module, "stride")
+                stride_w = stride_h
+                pad_h = _square_pair(module, "padding")
+                pad_w = pad_h
+                out_h = (input_shape[2] + 2 * pad_h - (kernel_h - 1) - 1) // stride_h + 1
+                out_w = (input_shape[3] + 2 * pad_w - (kernel_w - 1) - 1) // stride_w + 1
+                shapes[node.name] = [input_shape[0], input_shape[1], out_h, out_w]
+            elif isinstance(module, torch.nn.AdaptiveAvgPool2d):
+                if len(input_shape) != 4:
+                    raise RuntimeError(f"unsupported AdaptiveAvgPool2d input shape: {input_shape}")
+                if tuple(module.output_size) != (1, 1):
+                    raise RuntimeError("only AdaptiveAvgPool2d((1, 1)) is supported")
+                shapes[node.name] = [input_shape[0], input_shape[1], 1, 1]
+            elif isinstance(module, torch.nn.Flatten):
+                if module.start_dim != 1 or module.end_dim != -1:
+                    raise RuntimeError("only Flatten(start_dim=1, end_dim=-1) is supported")
+                flat = 1
+                for dim in input_shape[1:]:
+                    flat *= dim
+                shapes[node.name] = [input_shape[0], flat]
+            elif isinstance(
+                module,
+                (
+                    torch.nn.GELU,
+                    torch.nn.SiLU,
+                    torch.nn.Sigmoid,
+                    torch.nn.Tanh,
+                    torch.nn.LeakyReLU,
+                    torch.nn.Dropout,
+                    torch.nn.Dropout2d,
+                    torch.nn.Identity,
+                ),
+            ):
+                shapes[node.name] = input_shape
             elif isinstance(module, torch.nn.ReLU):
                 shapes[node.name] = input_shape
             else:
@@ -420,6 +612,64 @@ def _graph_program(traced, shapes):
                     "pad_h": pad_h,
                     "pad_w": pad_w,
                     "input_shape": shapes[_predecessor_name(node)],
+                    "shape": shapes[node.name],
+                }
+            )
+        elif isinstance(module, torch.nn.AvgPool2d):
+            kernel_h = _square_pair(module, "kernel_size")
+            kernel_w = kernel_h
+            stride_h = _square_pair(module, "stride")
+            stride_w = stride_h
+            pad_h = _square_pair(module, "padding")
+            pad_w = pad_h
+            program.append(
+                {
+                    "kind": "avgpool2d",
+                    "name": node.name,
+                    "input": input_name,
+                    "kernel_h": kernel_h,
+                    "kernel_w": kernel_w,
+                    "stride_h": stride_h,
+                    "stride_w": stride_w,
+                    "pad_h": pad_h,
+                    "pad_w": pad_w,
+                    "input_shape": shapes[_predecessor_name(node)],
+                    "shape": shapes[node.name],
+                }
+            )
+        elif isinstance(module, torch.nn.AdaptiveAvgPool2d):
+            program.append(
+                {
+                    "kind": "adaptive_avgpool2d",
+                    "name": node.name,
+                    "input": input_name,
+                    "input_shape": shapes[_predecessor_name(node)],
+                    "shape": shapes[node.name],
+                }
+            )
+        elif isinstance(
+            module,
+            (torch.nn.GELU, torch.nn.SiLU, torch.nn.Sigmoid, torch.nn.Tanh, torch.nn.LeakyReLU),
+        ):
+            mode, negative_slope = _activation_mode(module)
+            program.append(
+                {
+                    "kind": "activation",
+                    "name": node.name,
+                    "input": input_name,
+                    "mode": mode,
+                    "negative_slope": negative_slope,
+                    "shape": shapes[node.name],
+                }
+            )
+        elif isinstance(
+            module, (torch.nn.Dropout, torch.nn.Dropout2d, torch.nn.Identity, torch.nn.Flatten)
+        ):
+            program.append(
+                {
+                    "kind": "copy",
+                    "name": node.name,
+                    "input": input_name,
                     "shape": shapes[node.name],
                 }
             )
@@ -538,12 +788,28 @@ def _relu_index(relus, op):
     return next(index for index, candidate in enumerate(relus) if candidate is op)
 
 
+def _activation_index(activations, op):
+    return next(index for index, candidate in enumerate(activations) if candidate is op)
+
+
+def _copy_index(copies, op):
+    return next(index for index, candidate in enumerate(copies) if candidate is op)
+
+
 def _batch_norm_index(batch_norms, op):
     return next(index for index, candidate in enumerate(batch_norms) if candidate is op)
 
 
 def _max_pool_index(max_pools, op):
     return next(index for index, candidate in enumerate(max_pools) if candidate is op)
+
+
+def _avg_pool_index(avg_pools, op):
+    return next(index for index, candidate in enumerate(avg_pools) if candidate is op)
+
+
+def _adaptive_avg_pool_index(adaptive_avg_pools, op):
+    return next(index for index, candidate in enumerate(adaptive_avg_pools) if candidate is op)
 
 
 def _weighted_index(weighted_ops, op):
@@ -561,8 +827,12 @@ def generate_native_runner(args: argparse.Namespace, output_path: pathlib.Path) 
     linears = [op for op in program if op["kind"] == "linear"]
     convs = [op for op in program if op["kind"] == "conv2d"]
     relus = [op for op in program if op["kind"] == "relu"]
+    activations = [op for op in program if op["kind"] == "activation"]
+    copies = [op for op in program if op["kind"] == "copy"]
     batch_norms = [op for op in program if op["kind"] == "batchnorm2d"]
     max_pools = [op for op in program if op["kind"] == "maxpool2d"]
+    avg_pools = [op for op in program if op["kind"] == "avgpool2d"]
+    adaptive_avg_pools = [op for op in program if op["kind"] == "adaptive_avgpool2d"]
     weighted = [op for op in program if op["kind"] in ("linear", "conv2d")]
 
     ptx_by_key = {}
@@ -625,6 +895,35 @@ def generate_native_runner(args: argparse.Namespace, output_path: pathlib.Path) 
         ).replace("relu_kernel", f"relu_{index}_kernel")
         ptx_by_key[f"relu_{index}"] = ptx
 
+    for index, op in enumerate(activations):
+        count = _numel(op["shape"])
+        input_tensor = torch.empty(count, device="cuda", dtype=torch.float32)
+        output_tensor = torch.empty(count, device="cuda", dtype=torch.float32)
+        ptx = _compile_kernel(
+            activation_kernel,
+            (1,),
+            (input_tensor, output_tensor, count),
+            {
+                "BLOCK": args.block,
+                "mode": op["mode"],
+                "negative_slope": op["negative_slope"],
+                "num_warps": 1,
+            },
+        ).replace("activation_kernel", f"activation_{index}_kernel")
+        ptx_by_key[f"activation_{index}"] = ptx
+
+    for index, op in enumerate(copies):
+        count = _numel(op["shape"])
+        input_tensor = torch.empty(count, device="cuda", dtype=torch.float32)
+        output_tensor = torch.empty(count, device="cuda", dtype=torch.float32)
+        ptx = _compile_kernel(
+            copy_kernel,
+            (1,),
+            (input_tensor, output_tensor, count),
+            {"BLOCK": args.block, "num_warps": 1},
+        ).replace("copy_kernel", f"copy_{index}_kernel")
+        ptx_by_key[f"copy_{index}"] = ptx
+
     for index, op in enumerate(batch_norms):
         n, c, h, w = op["input_shape"]
         count = n * c * h * w
@@ -670,6 +969,43 @@ def generate_native_runner(args: argparse.Namespace, output_path: pathlib.Path) 
         ).replace("maxpool2d_kernel", f"maxpool2d_{index}_kernel")
         ptx_by_key[f"maxpool2d_{index}"] = ptx
 
+    for index, op in enumerate(avg_pools):
+        n, c, h, w = op["input_shape"]
+        out_h, out_w = op["shape"][2], op["shape"][3]
+        x = torch.randn(n, c, h, w, device="cuda", dtype=torch.float32)
+        out = torch.empty(n, c, out_h, out_w, device="cuda", dtype=torch.float32)
+        ptx = _compile_kernel(
+            avgpool2d_kernel,
+            (n * c, out_h, out_w),
+            (x, out),
+            {
+                "C": c,
+                "H": h,
+                "W": w,
+                "KH": op["kernel_h"],
+                "KW": op["kernel_w"],
+                "stride": op["stride_h"],
+                "pad": op["pad_h"],
+                "num_warps": 1,
+            },
+        ).replace("avgpool2d_kernel", f"avgpool2d_{index}_kernel")
+        ptx_by_key[f"avgpool2d_{index}"] = ptx
+
+    for index, op in enumerate(adaptive_avg_pools):
+        n, c, h, w = op["input_shape"]
+        x = torch.randn(n, c, h, w, device="cuda", dtype=torch.float32)
+        out = torch.empty(n * c, device="cuda", dtype=torch.float32)
+        ptx = _compile_kernel(
+            adaptive_avgpool2d_1x1_kernel,
+            (n * c,),
+            (x, out),
+            {"H": h, "W": w, "num_warps": 1},
+        ).replace(
+            "adaptive_avgpool2d_1x1_kernel",
+            f"adaptive_avgpool2d_{index}_kernel",
+        )
+        ptx_by_key[f"adaptive_avgpool2d_{index}"] = ptx
+
     output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_text(
         _generate_cpp(
@@ -679,8 +1015,12 @@ def generate_native_runner(args: argparse.Namespace, output_path: pathlib.Path) 
             linears,
             convs,
             relus,
+            activations,
+            copies,
             batch_norms,
             max_pools,
+            avg_pools,
+            adaptive_avg_pools,
             weighted,
             shapes,
             ptx_by_key,
@@ -695,8 +1035,12 @@ def _generate_cpp(
     linears,
     convs,
     relus,
+    activations,
+    copies,
     batch_norms,
     max_pools,
+    avg_pools,
+    adaptive_avg_pools,
     weighted,
     shapes,
     ptx_by_key,
@@ -717,20 +1061,38 @@ def _generate_cpp(
     for index, _ in enumerate(relus):
         function_loads.append(f"""  CUfunction relu{index}_fn = load_function(
       R"CUPTX({ptx_by_key[f"relu_{index}"]})CUPTX", "relu_{index}_kernel");""")
+    for index, _ in enumerate(activations):
+        function_loads.append(f"""  CUfunction activation{index}_fn = load_function(
+      R"CUPTX({ptx_by_key[f"activation_{index}"]})CUPTX", "activation_{index}_kernel");""")
+    for index, _ in enumerate(copies):
+        function_loads.append(f"""  CUfunction copy{index}_fn = load_function(
+      R"CUPTX({ptx_by_key[f"copy_{index}"]})CUPTX", "copy_{index}_kernel");""")
     for index, _ in enumerate(batch_norms):
         function_loads.append(f"""  CUfunction batchnorm{index}_fn = load_function(
       R"CUPTX({ptx_by_key[f"batchnorm2d_{index}"]})CUPTX", "batchnorm2d_{index}_kernel");""")
     for index, _ in enumerate(max_pools):
         function_loads.append(f"""  CUfunction maxpool{index}_fn = load_function(
       R"CUPTX({ptx_by_key[f"maxpool2d_{index}"]})CUPTX", "maxpool2d_{index}_kernel");""")
+    for index, _ in enumerate(avg_pools):
+        function_loads.append(f"""  CUfunction avgpool{index}_fn = load_function(
+      R"CUPTX({ptx_by_key[f"avgpool2d_{index}"]})CUPTX", "avgpool2d_{index}_kernel");""")
+    for index, _ in enumerate(adaptive_avg_pools):
+        function_loads.append(
+            f"""  CUfunction adaptive_avgpool{index}_fn = load_function(
+      R"CUPTX({ptx_by_key[f"adaptive_avgpool2d_{index}"]})CUPTX", "adaptive_avgpool2d_{index}_kernel");"""
+        )
     declarations = "\n".join(function_loads)
     check_functions = (
         " || ".join(
             [f"!linear{index}_fn" for index in range(len(linears))]
             + [f"!conv{index}_fn" for index in range(len(convs))]
             + [f"!relu{index}_fn" for index in range(len(relus))]
+            + [f"!activation{index}_fn" for index in range(len(activations))]
+            + [f"!copy{index}_fn" for index in range(len(copies))]
             + [f"!batchnorm{index}_fn" for index in range(len(batch_norms))]
             + [f"!maxpool{index}_fn" for index in range(len(max_pools))]
+            + [f"!avgpool{index}_fn" for index in range(len(avg_pools))]
+            + [f"!adaptive_avgpool{index}_fn" for index in range(len(adaptive_avg_pools))]
         )
         or "false"
     )
@@ -880,20 +1242,47 @@ def _generate_cpp(
                        {output_var}, {n * c}, {out_h}, {out_w})) {{
     return 11;
   }}""")
-        else:
+        elif op["kind"] == "avgpool2d":
+            avg_pool_index = _avg_pool_index(avg_pools, op)
+            n, c, h, w = op["input_shape"]
+            out_h = op["shape"][2]
+            out_w = op["shape"][3]
+            launches.append(f"""  if (!launch_avgpool(avgpool{avg_pool_index}_fn, {input_var},
+                       {output_var}, {n * c}, {out_h}, {out_w})) {{
+    return 12;
+  }}""")
+        elif op["kind"] == "adaptive_avgpool2d":
+            adaptive_pool_index = _adaptive_avg_pool_index(adaptive_avg_pools, op)
+            batch_channels = _numel(op["shape"])
+            launches.append(
+                f"""  if (!launch_adaptive_avgpool(adaptive_avgpool{adaptive_pool_index}_fn,
+                       {input_var}, {output_var}, {batch_channels})) {{
+    return 13;
+  }}"""
+            )
+        elif op["kind"] == "relu":
             index = _relu_index(relus, op)
             count = _numel(op["shape"])
-            launches.append(f"""  CUdeviceptr relu_scratch{index} = 0;
-  int relu_count{index} = {count};
-  void *relu_params[] = {{&{input_var}, &{output_var}, &relu_count{index}, &relu_scratch{index}}};
-  const unsigned int relu_grid =
-      (static_cast<unsigned int>(relu_count{index}) + {args.block} - 1) /
-      {args.block};
-  if (!check(cuLaunchKernel(relu{index}_fn, relu_grid, 1, 1,
-                            {args.block}, 1, 1, 0, nullptr, relu_params,
-                            nullptr))) {{
+            launches.append(f"""  if (!launch_elementwise(relu{index}_fn, {input_var},
+                          {output_var}, {count}, {args.block})) {{
     return 7;
   }}""")
+        elif op["kind"] == "activation":
+            index = _activation_index(activations, op)
+            count = _numel(op["shape"])
+            launches.append(f"""  if (!launch_elementwise(activation{index}_fn, {input_var},
+                          {output_var}, {count}, {args.block})) {{
+    return 14;
+  }}""")
+        elif op["kind"] == "copy":
+            index = _copy_index(copies, op)
+            count = _numel(op["shape"])
+            launches.append(f"""  if (!launch_elementwise(copy{index}_fn, {input_var},
+                          {output_var}, {count}, {args.block})) {{
+    return 15;
+  }}""")
+        else:
+            raise RuntimeError(f"unsupported program operation: {op['kind']}")
 
     final_var = _buffer_name(final_node.name)
     final_count = _numel(shapes[final_node.name])
@@ -922,6 +1311,18 @@ def _generate_cpp(
                               static_cast<unsigned int>(out_w), 32, 1, 1, 0,
                               nullptr, params, nullptr));
 }""")
+    if relus or activations or copies:
+        launch_helpers.append("""bool launch_elementwise(CUfunction function, CUdeviceptr x,
+                        CUdeviceptr out, int count, int block) {
+  CUdeviceptr scratch = 0;
+  void *params[] = {&x, &out, &count, &scratch};
+  const unsigned int grid =
+      (static_cast<unsigned int>(count) + static_cast<unsigned int>(block) - 1) /
+      static_cast<unsigned int>(block);
+  return check(cuLaunchKernel(function, grid, 1, 1,
+                              static_cast<unsigned int>(block), 1, 1, 0,
+                              nullptr, params, nullptr));
+}""")
     if batch_norms:
         launch_helpers.append("""bool launch_batchnorm(CUfunction function, CUdeviceptr x,
                        CUdeviceptr weight, CUdeviceptr bias, CUdeviceptr mean,
@@ -942,6 +1343,27 @@ def _generate_cpp(
                               static_cast<unsigned int>(out_h),
                               static_cast<unsigned int>(out_w), 32, 1, 1, 0,
                               nullptr, params, nullptr));
+}""")
+    if avg_pools:
+        launch_helpers.append("""bool launch_avgpool(CUfunction function, CUdeviceptr x,
+                   CUdeviceptr out, int batch_channels, int out_h,
+                   int out_w) {
+  CUdeviceptr scratch = 0;
+  void *params[] = {&x, &out, &scratch};
+  return check(cuLaunchKernel(function,
+                              static_cast<unsigned int>(batch_channels),
+                              static_cast<unsigned int>(out_h),
+                              static_cast<unsigned int>(out_w), 32, 1, 1, 0,
+                              nullptr, params, nullptr));
+}""")
+    if adaptive_avg_pools:
+        launch_helpers.append("""bool launch_adaptive_avgpool(CUfunction function, CUdeviceptr x,
+                              CUdeviceptr out, int batch_channels) {
+  CUdeviceptr scratch = 0;
+  void *params[] = {&x, &out, &scratch};
+  return check(cuLaunchKernel(function,
+                              static_cast<unsigned int>(batch_channels), 1, 1,
+                              32, 1, 1, 0, nullptr, params, nullptr));
 }""")
     launch_helpers_text = "\n".join(launch_helpers)
 

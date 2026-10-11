@@ -639,7 +639,9 @@ Current status:
   `detection` and `sequence` kernels. The simple PyTorch-generated model
   CPU-reference flow is also green for vector-add, matmul, MLP, and a traced
   `torch.fx` module spec that lowers supported `Linear`/`ReLU`/`Conv2d`/
-  `BatchNorm2d`/`MaxPool2d` graphs to embedded Triton SIMT PTX.
+  `BatchNorm2d`/`MaxPool2d`/`AvgPool2d`/`AdaptiveAvgPool2d`/`GELU`/`SiLU`/
+  `Sigmoid`/`Tanh`/`LeakyReLU`/`Flatten`/`Dropout`/`Identity` graphs to
+  embedded Triton SIMT PTX.
 - Future work: replace the fixed 1024-entry virtual-register banks with a
   `.reg`-declaration-driven `RegisterLayout` at PTX lowering. The current
   direct mapping is sufficient for the existing corpus; a dynamic layout is

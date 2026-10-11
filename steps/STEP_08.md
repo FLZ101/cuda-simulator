@@ -38,6 +38,7 @@ tests/models/specs/module.py
 tests/models/fixtures/mlp_module.py
 tests/models/fixtures/conv_module.py
 tests/models/fixtures/resnet_stem.py
+tests/models/fixtures/cnn_ops.py
 tests/ptx/scalar_math_kernel.ptx
 tests/ptx/scalar_math_exec_smoke.cpp
 ```
@@ -552,6 +553,18 @@ Comparison requirements:
   `models.resnet_stem.runner_sim`, `ptx.scalar_math_exec_smoke`, all
   model-runner tests, and the full 41-test CTest suite pass.
 
+- Extended the traced-module runner with parameter-free CNN and LLM layers:
+  `nn.GELU`, `nn.SiLU`, `nn.Sigmoid`, `nn.Tanh`, `nn.LeakyReLU`,
+  `nn.AvgPool2d`, `nn.AdaptiveAvgPool2d((1, 1))`, `nn.Flatten`,
+  `nn.Dropout`, `nn.Dropout2d`, and `nn.Identity`. The new CNN fixture chains
+  `Conv2d -> BatchNorm2d -> GELU -> AvgPool2d -> AdaptiveAvgPool2d ->
+  Flatten -> Dropout -> Identity`.
+- files: `tests/models/specs/module.py`,
+  `tests/models/fixtures/cnn_ops.py`, `tests/CMakeLists.txt`,
+  `src/exec/executor.cpp`
+- verification: `models.cnn_ops.runner_cpu`, `models.cnn_ops.runner_sim`,
+  all traced-module model tests, and the full 43-test CTest suite pass.
+
 ## Verification
 
 Commands run:
@@ -560,14 +573,14 @@ Commands run:
 cmake --build build -j 4
 ctest --test-dir build -R kernels.gpu_reference_differential_detection --output-on-failure
 ctest --test-dir build -R kernels.gpu_reference_differential_sequence --output-on-failure
-ctest --test-dir build -R 'models\.(vector_add|matmul|mlp|module|conv_module|resnet_stem)\.runner_(cpu|sim)' --output-on-failure
+ctest --test-dir build -R 'models\.(vector_add|matmul|mlp|module|conv_module|resnet_stem|cnn_ops)\.runner_(cpu|sim)' --output-on-failure
 ctest --test-dir build --output-on-failure
 ```
 
 Result:
 
 ```text
-100% tests passed, 0 tests failed out of 41
+100% tests passed, 0 tests failed out of 43
 ```
 
 Required before Step 9:

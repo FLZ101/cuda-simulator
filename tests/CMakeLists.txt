@@ -886,6 +886,74 @@ add_test(
           --output-dir ${CMAKE_CURRENT_BINARY_DIR}/models/resnet_stem
 )
 
+set(CNN_OPS_RUNNER_SRC ${GENERATED_MODEL_DIR}/cnn_ops_runner.cu)
+set(CNN_OPS_MODEL_FIXTURE
+  ${CMAKE_CURRENT_SOURCE_DIR}/models/fixtures/cnn_ops.py)
+
+add_custom_command(
+  OUTPUT ${CNN_OPS_RUNNER_SRC}
+  COMMAND ${SIM_PYTHON} ${CMAKE_CURRENT_SOURCE_DIR}/models/generate_model_runner.py
+          --spec module
+          --output-cpp ${CNN_OPS_RUNNER_SRC}
+          --module-file ${CNN_OPS_MODEL_FIXTURE}
+          --batch 1
+          --in-channels 3
+          --out-channels 4
+          --height 8
+          --width 8
+          --block 32
+  DEPENDS
+    ${CMAKE_CURRENT_SOURCE_DIR}/models/generate_model_runner.py
+    ${CMAKE_CURRENT_SOURCE_DIR}/models/specs/module.py
+    ${CNN_OPS_MODEL_FIXTURE}
+  VERBATIM
+)
+
+add_executable(cnn_ops_model_runner ${CNN_OPS_RUNNER_SRC})
+set_target_properties(cnn_ops_model_runner PROPERTIES
+  CUDA_STANDARD 20
+  CUDA_STANDARD_REQUIRED ON
+  CUDA_ARCHITECTURES 86
+)
+target_link_libraries(cnn_ops_model_runner PRIVATE CUDA::cuda_driver)
+
+add_test(
+  NAME models.cnn_ops.runner_cpu
+  COMMAND ${SIM_PYTHON} ${CMAKE_CURRENT_SOURCE_DIR}/models/model_runner.py
+          --spec module
+          --mode cpu
+          --module-file ${CNN_OPS_MODEL_FIXTURE}
+          --batch 1
+          --in-channels 3
+          --out-channels 4
+          --height 8
+          --width 8
+          --runner $<TARGET_FILE:cnn_ops_model_runner>
+          --cudart $<TARGET_FILE:cudart_shim>
+          --cuda $<TARGET_FILE:cuda_shim>
+          --core-dir $<TARGET_FILE_DIR:cudasim_core>
+          --output-dir ${CMAKE_CURRENT_BINARY_DIR}/models/cnn_ops
+)
+add_test(
+  NAME models.cnn_ops.runner_sim
+  COMMAND ${SIM_PYTHON} ${CMAKE_CURRENT_SOURCE_DIR}/models/model_runner.py
+          --spec module
+          --mode gpu
+          --simulate
+          --compare
+          --module-file ${CNN_OPS_MODEL_FIXTURE}
+          --batch 1
+          --in-channels 3
+          --out-channels 4
+          --height 8
+          --width 8
+          --runner $<TARGET_FILE:cnn_ops_model_runner>
+          --cudart $<TARGET_FILE:cudart_shim>
+          --cuda $<TARGET_FILE:cuda_shim>
+          --core-dir $<TARGET_FILE_DIR:cudasim_core>
+          --output-dir ${CMAKE_CURRENT_BINARY_DIR}/models/cnn_ops
+)
+
 add_executable(runtime_api_smoke
   compat/runtime_api_smoke.cpp
 )
