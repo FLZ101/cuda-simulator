@@ -101,6 +101,15 @@ SUPPORTED_OPERATORS = {
     "local_response_norm",
     "fused_add_norm",
     "cumsum",
+    "group_norm",
+    "conv_transpose2d",
+    "pixel_unshuffle",
+    "reflection_pad2d",
+    "upsample_bilinear2d",
+    "adaptive_max_pool2d",
+    "rotary_embedding",
+    "gather",
+    "scatter_add",
 }
 
 
@@ -190,6 +199,27 @@ def main():
         cumsum_input = [float((i * 3) % 11) for i in range(16)]
         cumsum_path = os.path.join(tmp, "cumsum.bin")
         write_floats(cumsum_path, cumsum_input)
+        conv_t_input = [float(i) for i in range(4)]
+        conv_t_input_path = os.path.join(tmp, "conv_t_input.bin")
+        write_floats(conv_t_input_path, conv_t_input)
+        conv_t_weight = [0.25] * 4
+        conv_t_weight_path = os.path.join(tmp, "conv_t_weight.bin")
+        write_floats(conv_t_weight_path, conv_t_weight)
+        rotary_input = [float((i % 7) - 3) for i in range(32)]
+        rotary_input_path = os.path.join(tmp, "rotary_input.bin")
+        write_floats(rotary_input_path, rotary_input)
+        rotary_cos = [math.cos((i % 9) * 0.1) for i in range(16)]
+        rotary_cos_path = os.path.join(tmp, "rotary_cos.bin")
+        write_floats(rotary_cos_path, rotary_cos)
+        rotary_sin = [math.sin((i % 9) * 0.1) for i in range(16)]
+        rotary_sin_path = os.path.join(tmp, "rotary_sin.bin")
+        write_floats(rotary_sin_path, rotary_sin)
+        gather_indices = [2, 0, 3, 1]
+        gather_indices_path = os.path.join(tmp, "gather_indices.bin")
+        write_ints(gather_indices_path, gather_indices)
+        scatter_indices = [0, 2, 0, 3]
+        scatter_indices_path = os.path.join(tmp, "scatter_indices.bin")
+        write_ints(scatter_indices_path, scatter_indices)
         targets = [0, 1]
         targets_path = os.path.join(tmp, "targets.bin")
         write_ints(targets_path, targets)
@@ -322,6 +352,63 @@ def main():
         run_pair(
             "cumsum",
             lambda out: [cumsum_path, "2", "8", out],
+        )
+        run_pair(
+            "group_norm",
+            lambda out: [cnn_in_path, "4", "8", "2", "1e-5", out],
+        )
+        run_pair(
+            "conv_transpose2d",
+            lambda out: [
+                conv_t_input_path,
+                conv_t_weight_path,
+                "1",
+                "2",
+                "2",
+                "1",
+                "2",
+                "2",
+                "1",
+                "0",
+                "3",
+                "3",
+                out,
+            ],
+        )
+        run_pair(
+            "pixel_unshuffle",
+            lambda out: [cnn_in_path, "4", "2", "2", "2", out],
+        )
+        run_pair(
+            "reflection_pad2d",
+            lambda out: [cnn_in_path, "4", "2", "2", "1", out],
+        )
+        run_pair(
+            "upsample_bilinear2d",
+            lambda out: [cnn_in_path, "4", "2", "2", "2", out],
+        )
+        run_pair(
+            "adaptive_max_pool2d",
+            lambda out: [cnn_in_path, "4", "4", "2", "2", "1", out],
+        )
+        run_pair(
+            "rotary_embedding",
+            lambda out: [
+                rotary_input_path,
+                rotary_cos_path,
+                rotary_sin_path,
+                "4",
+                "8",
+                out,
+            ],
+        )
+        run_pair(
+            "gather",
+            lambda out: [cnn_in_path, gather_indices_path, "4", "8", out],
+        )
+        run_pair(
+            "scatter_add",
+            lambda out: [cnn_in_path, scatter_indices_path, "4", "8", "4", out],
         )
         bias = [0.1, -0.2, 0.3, 0.4]
         bias_path = os.path.join(tmp, "bias.bin")

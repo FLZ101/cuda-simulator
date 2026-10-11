@@ -120,6 +120,15 @@ set(CLASSIC_KERNEL_NAMES
   local_response_norm
   fused_add_norm
   cumsum
+  group_norm
+  conv_transpose2d
+  pixel_unshuffle
+  reflection_pad2d
+  upsample_bilinear2d
+  adaptive_max_pool2d
+  rotary_embedding
+  gather
+  scatter_add
 )
 
 add_custom_command(
@@ -386,6 +395,15 @@ target_compile_definitions(gpu_reference_runner PRIVATE
   LOCAL_RESPONSE_NORM_PTX_PATH="${GENERATED_PTX_DIR}/local_response_norm.ptx"
   FUSED_ADD_NORM_PTX_PATH="${GENERATED_PTX_DIR}/fused_add_norm.ptx"
   CUMSUM_PTX_PATH="${GENERATED_PTX_DIR}/cumsum.ptx"
+  GROUP_NORM_PTX_PATH="${GENERATED_PTX_DIR}/group_norm.ptx"
+  CONV_TRANSPOSE2D_PTX_PATH="${GENERATED_PTX_DIR}/conv_transpose2d.ptx"
+  PIXEL_UNSHUFFLE_PTX_PATH="${GENERATED_PTX_DIR}/pixel_unshuffle.ptx"
+  REFLECTION_PAD2D_PTX_PATH="${GENERATED_PTX_DIR}/reflection_pad2d.ptx"
+  UPSAMPLE_BILINEAR2D_PTX_PATH="${GENERATED_PTX_DIR}/upsample_bilinear2d.ptx"
+  ADAPTIVE_MAX_POOL2D_PTX_PATH="${GENERATED_PTX_DIR}/adaptive_max_pool2d.ptx"
+  ROTARY_EMBEDDING_PTX_PATH="${GENERATED_PTX_DIR}/rotary_embedding.ptx"
+  GATHER_PTX_PATH="${GENERATED_PTX_DIR}/gather.ptx"
+  SCATTER_ADD_PTX_PATH="${GENERATED_PTX_DIR}/scatter_add.ptx"
 )
 add_dependencies(gpu_reference_runner
   generate_bias_add_ptx
@@ -479,6 +497,15 @@ add_dependencies(gpu_reference_runner
   generate_local_response_norm_ptx
   generate_fused_add_norm_ptx
   generate_cumsum_ptx
+  generate_group_norm_ptx
+  generate_conv_transpose2d_ptx
+  generate_pixel_unshuffle_ptx
+  generate_reflection_pad2d_ptx
+  generate_upsample_bilinear2d_ptx
+  generate_adaptive_max_pool2d_ptx
+  generate_rotary_embedding_ptx
+  generate_gather_ptx
+  generate_scatter_add_ptx
 )
 add_test(
   NAME kernels.gpu_reference_differential

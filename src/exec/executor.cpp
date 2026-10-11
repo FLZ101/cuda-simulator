@@ -1362,7 +1362,8 @@ bool execute_instruction(
     return true;
   }
 
-  if (opcode == "atom.add.global.f32" || opcode == "atom.add.global.u32") {
+  if (opcode == "atom.add.global.f32" || opcode == "atom.global.add.f32" ||
+      opcode == "atom.add.global.u32") {
     std::size_t pos = 0;
     while (pos < instruction.operand_tokens.size() &&
            instruction.operand_tokens[pos].kind !=
@@ -1384,7 +1385,7 @@ bool execute_instruction(
       return false;
     }
 
-    if (opcode == "atom.add.global.f32") {
+    if (opcode == "atom.add.global.f32" || opcode == "atom.global.add.f32") {
       float fv = 0.0F;
       std::memcpy(&fv, &registers.values[value->index][lane], sizeof(fv));
       cudasim::mem::atomic_add_f32(
@@ -1549,6 +1550,20 @@ bool execute_instruction(
     std::uint32_t bits = 0;
     std::memcpy(&bits, &value, sizeof(bits));
     registers.values[dst->index][lane] = bits;
+    next_pc = pc + 1;
+    return true;
+  }
+
+  if (opcode == "cvt.rzi.s32.f32") {
+    std::size_t pos = 0;
+    auto dst = parse_register(instruction.operand_tokens, pos);
+    auto a =
+        parse_f32_operand(instruction.operand_tokens, pos, registers, lane);
+    if (!dst || !a) {
+      return false;
+    }
+    const auto value = static_cast<std::int32_t>(*a);
+    registers.values[dst->index][lane] = static_cast<std::uint32_t>(value);
     next_pc = pc + 1;
     return true;
   }

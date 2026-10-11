@@ -419,6 +419,23 @@ Comparison requirements:
 - verification: `cmake --build build -j 4` and `ctest --test-dir build`
   are green; `kernels.gpu_reference_differential` passes with all 18 tests.
 
+- Added another CNN/LLM operator batch: `group_norm`, `conv_transpose2d`,
+  `pixel_unshuffle`, `reflection_pad2d`, `upsample_bilinear2d`,
+  `adaptive_max_pool2d`, `rotary_embedding`, `gather`, and `scatter_add`.
+  Added `cvt.rzi.s32.f32` and `atom.global.add.f32`.
+- files: `tests/kernels/group_norm.cu`,
+  `tests/kernels/conv_transpose2d.cu`,
+  `tests/kernels/pixel_unshuffle.cu`,
+  `tests/kernels/reflection_pad2d.cu`,
+  `tests/kernels/upsample_bilinear2d.cu`,
+  `tests/kernels/adaptive_max_pool2d.cu`,
+  `tests/kernels/rotary_embedding.cu`, `tests/kernels/gather.cu`,
+  `tests/kernels/scatter_add.cu`, `src/exec/executor.cpp`,
+  `tests/reference/gpu_reference_runner.cu`,
+  `tests/reference/run_gpu_reference.py`, `tests/CMakeLists.txt`
+- verification: `cmake --build build -j 4` and `ctest --test-dir build`
+  are green; `kernels.gpu_reference_differential` passes with all 18 tests.
+
 ## Verification
 
 Commands run:

@@ -1548,6 +1548,284 @@ int main(int argc, char **argv) {
     return 0;
   }
 
+  if (mode == "group_norm") {
+    if (argc != 8) {
+      return 101;
+    }
+    auto input = read_floats(argv[2]);
+    const int channels = std::stoi(argv[3]);
+    const int size = std::stoi(argv[4]);
+    const int groups = std::stoi(argv[5]);
+    const float eps = std::stof(argv[6]);
+    const int total = channels * size;
+    CUdeviceptr d_in = alloc_copy(input.data(), input.size() * sizeof(float));
+    CUdeviceptr d_out = 0;
+    cuMemAlloc(&d_out, static_cast<std::size_t>(total) * sizeof(float));
+    int c = channels;
+    int s = size;
+    int g = groups;
+    float e = eps;
+    std::vector<void *> params = {&d_in, &d_out, &c, &s, &g, &e};
+    CUfunction f = load_function(GROUP_NORM_PTX_PATH, "group_norm");
+    if (!f || !launch_1d(f, params, groups, 1)) {
+      return 102;
+    }
+    std::vector<float> output(static_cast<std::size_t>(total));
+    cuMemcpyDtoH(output.data(), d_out, output.size() * sizeof(float));
+    write_floats(out_path, output);
+    return 0;
+  }
+
+  if (mode == "conv_transpose2d") {
+    if (argc != 15) {
+      return 103;
+    }
+    auto input = read_floats(argv[2]);
+    auto weight = read_floats(argv[3]);
+    const int channels = std::stoi(argv[4]);
+    const int in_h = std::stoi(argv[5]);
+    const int in_w = std::stoi(argv[6]);
+    const int out_channels = std::stoi(argv[7]);
+    const int kernel_h = std::stoi(argv[8]);
+    const int kernel_w = std::stoi(argv[9]);
+    const int stride = std::stoi(argv[10]);
+    const int pad = std::stoi(argv[11]);
+    const int out_h = std::stoi(argv[12]);
+    const int out_w = std::stoi(argv[13]);
+    const int total = out_channels * out_h * out_w;
+    CUdeviceptr d_in = alloc_copy(input.data(), input.size() * sizeof(float));
+    CUdeviceptr d_weight =
+        alloc_copy(weight.data(), weight.size() * sizeof(float));
+    CUdeviceptr d_out = 0;
+    cuMemAlloc(&d_out, static_cast<std::size_t>(total) * sizeof(float));
+    int c = channels;
+    int ih = in_h;
+    int iw = in_w;
+    int oc = out_channels;
+    int kh = kernel_h;
+    int kw = kernel_w;
+    int st = stride;
+    int p = pad;
+    int oh = out_h;
+    int ow = out_w;
+    std::vector<void *> params = {&d_in, &d_weight, &d_out, &c, &ih, &iw, &oc,
+                                  &kh,   &kw,       &st,    &p, &oh, &ow};
+    CUfunction f = load_function(CONV_TRANSPOSE2D_PTX_PATH, "conv_transpose2d");
+    if (!f || !launch_1d(f, params, total)) {
+      return 104;
+    }
+    std::vector<float> output(static_cast<std::size_t>(total));
+    cuMemcpyDtoH(output.data(), d_out, output.size() * sizeof(float));
+    write_floats(out_path, output);
+    return 0;
+  }
+
+  if (mode == "pixel_unshuffle") {
+    if (argc != 8) {
+      return 105;
+    }
+    auto input = read_floats(argv[2]);
+    const int channels = std::stoi(argv[3]);
+    const int downscale = std::stoi(argv[4]);
+    const int in_h = std::stoi(argv[5]);
+    const int in_w = std::stoi(argv[6]);
+    const int out_channels = channels * downscale * downscale;
+    const int out_h = in_h / downscale;
+    const int out_w = in_w / downscale;
+    const int total = out_channels * out_h * out_w;
+    CUdeviceptr d_in = alloc_copy(input.data(), input.size() * sizeof(float));
+    CUdeviceptr d_out = 0;
+    cuMemAlloc(&d_out, static_cast<std::size_t>(total) * sizeof(float));
+    int c = channels;
+    int d = downscale;
+    int h = in_h;
+    int w = in_w;
+    std::vector<void *> params = {&d_in, &d_out, &c, &d, &h, &w};
+    CUfunction f = load_function(PIXEL_UNSHUFFLE_PTX_PATH, "pixel_unshuffle");
+    if (!f || !launch_1d(f, params, total)) {
+      return 106;
+    }
+    std::vector<float> output(static_cast<std::size_t>(total));
+    cuMemcpyDtoH(output.data(), d_out, output.size() * sizeof(float));
+    write_floats(out_path, output);
+    return 0;
+  }
+
+  if (mode == "reflection_pad2d") {
+    if (argc != 8) {
+      return 107;
+    }
+    auto input = read_floats(argv[2]);
+    const int channels = std::stoi(argv[3]);
+    const int in_h = std::stoi(argv[4]);
+    const int in_w = std::stoi(argv[5]);
+    const int pad = std::stoi(argv[6]);
+    const int total = channels * (in_h + 2 * pad) * (in_w + 2 * pad);
+    CUdeviceptr d_in = alloc_copy(input.data(), input.size() * sizeof(float));
+    CUdeviceptr d_out = 0;
+    cuMemAlloc(&d_out, static_cast<std::size_t>(total) * sizeof(float));
+    int c = channels;
+    int h = in_h;
+    int w = in_w;
+    int p = pad;
+    std::vector<void *> params = {&d_in, &d_out, &c, &h, &w, &p};
+    CUfunction f = load_function(REFLECTION_PAD2D_PTX_PATH, "reflection_pad2d");
+    if (!f || !launch_1d(f, params, total)) {
+      return 108;
+    }
+    std::vector<float> output(static_cast<std::size_t>(total));
+    cuMemcpyDtoH(output.data(), d_out, output.size() * sizeof(float));
+    write_floats(out_path, output);
+    return 0;
+  }
+
+  if (mode == "upsample_bilinear2d") {
+    if (argc != 8) {
+      return 109;
+    }
+    auto input = read_floats(argv[2]);
+    const int channels = std::stoi(argv[3]);
+    const int in_h = std::stoi(argv[4]);
+    const int in_w = std::stoi(argv[5]);
+    const int scale = std::stoi(argv[6]);
+    const int total = channels * in_h * scale * in_w * scale;
+    CUdeviceptr d_in = alloc_copy(input.data(), input.size() * sizeof(float));
+    CUdeviceptr d_out = 0;
+    cuMemAlloc(&d_out, static_cast<std::size_t>(total) * sizeof(float));
+    int c = channels;
+    int h = in_h;
+    int w = in_w;
+    int s = scale;
+    std::vector<void *> params = {&d_in, &d_out, &c, &h, &w, &s};
+    CUfunction f =
+        load_function(UPSAMPLE_BILINEAR2D_PTX_PATH, "upsample_bilinear2d");
+    if (!f || !launch_1d(f, params, total)) {
+      return 110;
+    }
+    std::vector<float> output(static_cast<std::size_t>(total));
+    cuMemcpyDtoH(output.data(), d_out, output.size() * sizeof(float));
+    write_floats(out_path, output);
+    return 0;
+  }
+
+  if (mode == "adaptive_max_pool2d") {
+    if (argc != 9) {
+      return 111;
+    }
+    auto input = read_floats(argv[2]);
+    const int channels = std::stoi(argv[3]);
+    const int in_h = std::stoi(argv[4]);
+    const int in_w = std::stoi(argv[5]);
+    const int out_h = std::stoi(argv[6]);
+    const int out_w = std::stoi(argv[7]);
+    const int total = channels * out_h * out_w;
+    CUdeviceptr d_in = alloc_copy(input.data(), input.size() * sizeof(float));
+    CUdeviceptr d_out = 0;
+    cuMemAlloc(&d_out, static_cast<std::size_t>(total) * sizeof(float));
+    int c = channels;
+    int ih = in_h;
+    int iw = in_w;
+    int oh = out_h;
+    int ow = out_w;
+    std::vector<void *> params = {&d_in, &d_out, &c, &ih, &iw, &oh, &ow};
+    CUfunction f =
+        load_function(ADAPTIVE_MAX_POOL2D_PTX_PATH, "adaptive_max_pool2d");
+    if (!f || !launch_1d(f, params, total)) {
+      return 112;
+    }
+    std::vector<float> output(static_cast<std::size_t>(total));
+    cuMemcpyDtoH(output.data(), d_out, output.size() * sizeof(float));
+    write_floats(out_path, output);
+    return 0;
+  }
+
+  if (mode == "rotary_embedding") {
+    if (argc != 8) {
+      return 113;
+    }
+    auto input = read_floats(argv[2]);
+    auto cos_table = read_floats(argv[3]);
+    auto sin_table = read_floats(argv[4]);
+    const int tokens = std::stoi(argv[5]);
+    const int dim = std::stoi(argv[6]);
+    const int total = tokens * dim;
+    CUdeviceptr d_in = alloc_copy(input.data(), input.size() * sizeof(float));
+    CUdeviceptr d_cos =
+        alloc_copy(cos_table.data(), cos_table.size() * sizeof(float));
+    CUdeviceptr d_sin =
+        alloc_copy(sin_table.data(), sin_table.size() * sizeof(float));
+    CUdeviceptr d_out = 0;
+    cuMemAlloc(&d_out, static_cast<std::size_t>(total) * sizeof(float));
+    int t = tokens;
+    int d = dim;
+    std::vector<void *> params = {&d_in, &d_cos, &d_sin, &d_out, &t, &d};
+    CUfunction f = load_function(ROTARY_EMBEDDING_PTX_PATH, "rotary_embedding");
+    if (!f || !launch_1d(f, params, tokens, 1)) {
+      return 114;
+    }
+    std::vector<float> output(static_cast<std::size_t>(total));
+    cuMemcpyDtoH(output.data(), d_out, output.size() * sizeof(float));
+    write_floats(out_path, output);
+    return 0;
+  }
+
+  if (mode == "gather") {
+    if (argc != 7) {
+      return 115;
+    }
+    auto input = read_floats(argv[2]);
+    auto indices = read_ints(argv[3]);
+    const int num_indices = std::stoi(argv[4]);
+    const int cols = std::stoi(argv[5]);
+    const int total = num_indices * cols;
+    CUdeviceptr d_in = alloc_copy(input.data(), input.size() * sizeof(float));
+    CUdeviceptr d_indices =
+        alloc_copy(indices.data(), indices.size() * sizeof(int));
+    CUdeviceptr d_out = 0;
+    cuMemAlloc(&d_out, static_cast<std::size_t>(total) * sizeof(float));
+    int n = num_indices;
+    int c = cols;
+    std::vector<void *> params = {&d_in, &d_indices, &d_out, &n, &c};
+    CUfunction f = load_function(GATHER_PTX_PATH, "gather");
+    if (!f || !launch_1d(f, params, total)) {
+      return 116;
+    }
+    std::vector<float> output(static_cast<std::size_t>(total));
+    cuMemcpyDtoH(output.data(), d_out, output.size() * sizeof(float));
+    write_floats(out_path, output);
+    return 0;
+  }
+
+  if (mode == "scatter_add") {
+    if (argc != 8) {
+      return 117;
+    }
+    auto input = read_floats(argv[2]);
+    auto indices = read_ints(argv[3]);
+    const int rows = std::stoi(argv[4]);
+    const int cols = std::stoi(argv[5]);
+    const int num_indices = std::stoi(argv[6]);
+    const int total = rows * cols;
+    const int input_total = num_indices * cols;
+    CUdeviceptr d_in = alloc_copy(input.data(), input.size() * sizeof(float));
+    CUdeviceptr d_indices =
+        alloc_copy(indices.data(), indices.size() * sizeof(int));
+    std::vector<float> zeros(static_cast<std::size_t>(total), 0.0F);
+    CUdeviceptr d_out = alloc_copy(zeros.data(), zeros.size() * sizeof(float));
+    int r = rows;
+    int c = cols;
+    int n = num_indices;
+    std::vector<void *> params = {&d_in, &d_indices, &d_out, &r, &c, &n};
+    CUfunction f = load_function(SCATTER_ADD_PTX_PATH, "scatter_add");
+    if (!f || !launch_1d(f, params, input_total)) {
+      return 118;
+    }
+    std::vector<float> output(static_cast<std::size_t>(total));
+    cuMemcpyDtoH(output.data(), d_out, output.size() * sizeof(float));
+    write_floats(out_path, output);
+    return 0;
+  }
+
   if (mode == "leaky_relu") {
     if (argc != 6) {
       return 65;
