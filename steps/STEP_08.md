@@ -576,6 +576,19 @@ Comparison requirements:
 - verification: `models.llm_ops.runner_cpu`, `models.llm_ops.runner_sim`,
   all traced-module model tests, and the full 45-test CTest suite pass.
 
+- Broadened the traced-module converter with additional CNN/LLM operators:
+  `nn.Hardswish`, `nn.Hardsigmoid`, `nn.ReLU6`, `nn.Softplus`, `nn.ELU`,
+  `nn.SELU`, `nn.CELU`, `nn.Mish`, `nn.Hardtanh`, `nn.Softsign`,
+  `nn.LogSigmoid`, `nn.AdaptiveMaxPool2d((1, 1))`, `nn.LogSoftmax`, and
+  last-dim two-input `torch.cat`. The CNN fixture now covers the extra
+  activation, adaptive-max-pool, and log-softmax paths; the LLM fixture now
+  covers last-dim concatenation before softmax.
+- files: `tests/models/specs/module.py`,
+  `tests/models/fixtures/cnn_ops.py`,
+  `tests/models/fixtures/llm_ops.py`
+- verification: `models.cnn_ops.runner_cpu`, `models.cnn_ops.runner_sim`,
+  `models.llm_ops.runner_cpu`, and `models.llm_ops.runner_sim` pass.
+
 ## Verification
 
 Commands run:

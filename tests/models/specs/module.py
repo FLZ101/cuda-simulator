@@ -170,8 +170,31 @@ def activation_kernel(
         y = 1.0 / (1.0 + tl.exp(-x))
     elif mode == 3:
         y = 2.0 * tl.sigmoid(2.0 * x) - 1.0
-    else:
+    elif mode == 4:
         y = tl.where(x >= 0, x, negative_slope * x)
+    elif mode == 5:
+        y = x * tl.minimum(tl.maximum(x + 3.0, 0.0), 6.0) / 6.0
+    elif mode == 6:
+        y = tl.minimum(tl.maximum(x + 3.0, 0.0), 6.0) / 6.0
+    elif mode == 7:
+        y = tl.minimum(tl.maximum(x, 0.0), 6.0)
+    elif mode == 8:
+        y = tl.where(x > 20.0, x, tl.log(1.0 + tl.exp(x)))
+    elif mode == 9:
+        y = tl.where(x > 0.0, x, tl.exp(x) - 1.0)
+    elif mode == 10:
+        y = 1.0507009873554805 * tl.where(x > 0.0, x, 1.6732632423543772 * (tl.exp(x) - 1.0))
+    elif mode == 11:
+        y = tl.maximum(x, 0.0) + tl.minimum(0.0, tl.exp(x) - 1.0)
+    elif mode == 12:
+        softplus = tl.log(1.0 + tl.exp(x))
+        y = x * (2.0 * tl.sigmoid(2.0 * softplus) - 1.0)
+    elif mode == 13:
+        y = tl.minimum(tl.maximum(x, -1.0), 1.0)
+    elif mode == 14:
+        y = x / (1.0 + tl.abs(x))
+    else:
+        y = -tl.log(1.0 + tl.exp(-x))
     tl.store(out_ptr + offsets, y, mask=mask)
 
 
@@ -228,6 +251,21 @@ def adaptive_avgpool2d_1x1_kernel(
 
 
 @triton.jit
+def adaptive_maxpool2d_1x1_kernel(
+    x_ptr,
+    out_ptr,
+    H: tl.constexpr,
+    W: tl.constexpr,
+):
+    pid = tl.program_id(0)
+    acc = float("-inf")
+    for h in tl.range(0, H):
+        for w in tl.range(0, W):
+            acc = tl.maximum(acc, tl.load(x_ptr + pid * H * W + h * W + w))
+    tl.store(out_ptr + pid, acc)
+
+
+@triton.jit
 def binary_kernel(a_ptr, b_ptr, out_ptr, n, BLOCK: tl.constexpr, mode: tl.constexpr):
     pid = tl.program_id(0)
     offsets = pid * BLOCK + tl.arange(0, BLOCK)
@@ -236,6 +274,28 @@ def binary_kernel(a_ptr, b_ptr, out_ptr, n, BLOCK: tl.constexpr, mode: tl.conste
     b = tl.load(b_ptr + offsets, mask=mask)
     y = a + b if mode == 0 else a * b
     tl.store(out_ptr + offsets, y, mask=mask)
+
+
+@triton.jit
+def concat_last_kernel(
+    a_ptr,
+    b_ptr,
+    out_ptr,
+    n,
+    BLOCK: tl.constexpr,
+    A_INNER: tl.constexpr,
+    B_INNER: tl.constexpr,
+):
+    pid = tl.program_id(0)
+    offsets = pid * BLOCK + tl.arange(0, BLOCK)
+    inner = offsets % (A_INNER + B_INNER)
+    outer = offsets // (A_INNER + B_INNER)
+    mask = offsets < n
+    a_mask = mask & (inner < A_INNER)
+    b_mask = mask & (inner >= A_INNER)
+    a = tl.load(a_ptr + outer * A_INNER + inner, mask=a_mask, other=0.0)
+    b = tl.load(b_ptr + outer * B_INNER + (inner - A_INNER), mask=b_mask, other=0.0)
+    tl.store(out_ptr + offsets, a + b, mask=mask)
 
 
 @triton.jit
@@ -267,7 +327,7 @@ def layernorm_kernel(
 
 
 @triton.jit
-def softmax_kernel(x_ptr, out_ptr, N: tl.constexpr):
+def softmax_kernel(x_ptr, out_ptr, N: tl.constexpr, log: tl.constexpr):
     pid = tl.program_id(0)
     row = pid // N
     col = pid % N
@@ -278,7 +338,9 @@ def softmax_kernel(x_ptr, out_ptr, N: tl.constexpr):
     for j in tl.range(0, N):
         denominator += tl.exp(tl.load(x_ptr + row * N + j) - max_value)
     x = tl.load(x_ptr + pid)
-    tl.store(out_ptr + pid, tl.exp(x - max_value) / denominator)
+    y = x - max_value
+    result = y - tl.log(denominator) if log else tl.exp(y) / denominator
+    tl.store(out_ptr + pid, result)
 
 
 def add_arguments(parser: argparse.ArgumentParser) -> None:
@@ -390,6 +452,17 @@ def _activation_nodes(traced):
         torch.nn.Sigmoid,
         torch.nn.Tanh,
         torch.nn.LeakyReLU,
+        torch.nn.Hardswish,
+        torch.nn.Hardsigmoid,
+        torch.nn.ReLU6,
+        torch.nn.Softplus,
+        torch.nn.ELU,
+        torch.nn.SELU,
+        torch.nn.CELU,
+        torch.nn.Mish,
+        torch.nn.Hardtanh,
+        torch.nn.Softsign,
+        torch.nn.LogSigmoid,
     )
     for node in traced.graph.nodes:
         if node.op != "call_module":
@@ -427,6 +500,15 @@ def _adaptive_avg_pool_nodes(traced):
             yield node, module
 
 
+def _adaptive_max_pool_nodes(traced):
+    for node in traced.graph.nodes:
+        if node.op != "call_module":
+            continue
+        module = traced.get_submodule(node.target)
+        if isinstance(module, torch.nn.AdaptiveMaxPool2d):
+            yield node, module
+
+
 def _layer_norm_nodes(traced):
     for node in traced.graph.nodes:
         if node.op != "call_module":
@@ -441,7 +523,7 @@ def _softmax_nodes(traced):
         if node.op != "call_module":
             continue
         module = traced.get_submodule(node.target)
-        if isinstance(module, torch.nn.Softmax):
+        if isinstance(module, (torch.nn.Softmax, torch.nn.LogSoftmax)):
             yield node, module
 
 
@@ -458,6 +540,36 @@ def _activation_mode(module):
         return 3, 0.0
     if isinstance(module, torch.nn.LeakyReLU):
         return 4, module.negative_slope
+    if isinstance(module, torch.nn.Hardswish):
+        return 5, 0.0
+    if isinstance(module, torch.nn.Hardsigmoid):
+        return 6, 0.0
+    if isinstance(module, torch.nn.ReLU6):
+        return 7, 0.0
+    if isinstance(module, torch.nn.Softplus):
+        if module.beta != 1 or module.threshold != 20:
+            raise RuntimeError("only default Softplus(beta=1, threshold=20) is supported")
+        return 8, 0.0
+    if isinstance(module, torch.nn.ELU):
+        if module.alpha != 1.0:
+            raise RuntimeError("only default ELU(alpha=1) is supported")
+        return 9, 0.0
+    if isinstance(module, torch.nn.SELU):
+        return 10, 0.0
+    if isinstance(module, torch.nn.CELU):
+        if module.alpha != 1.0:
+            raise RuntimeError("only default CELU(alpha=1) is supported")
+        return 11, 0.0
+    if isinstance(module, torch.nn.Mish):
+        return 12, 0.0
+    if isinstance(module, torch.nn.Hardtanh):
+        if module.min_val != -1.0 or module.max_val != 1.0:
+            raise RuntimeError("only default Hardtanh(min_val=-1, max_val=1) is supported")
+        return 13, 0.0
+    if isinstance(module, torch.nn.Softsign):
+        return 14, 0.0
+    if isinstance(module, torch.nn.LogSigmoid):
+        return 15, 0.0
     raise RuntimeError(f"unsupported activation: {type(module).__name__}")
 
 
@@ -507,6 +619,26 @@ def _binary_mode(node):
     if node.target is operator.mul:
         return 1
     raise RuntimeError(f"unsupported binary target: {node.target}")
+
+
+def _cat_input_names(node):
+    if not node.args:
+        raise RuntimeError(f"unsupported cat call: {node.name}")
+    values = node.args[0]
+    if not isinstance(values, (tuple, list)) or len(values) != 2:
+        raise RuntimeError("only two-input torch.cat is supported")
+    left, right = values
+    if not isinstance(left, torch.fx.Node) or not isinstance(right, torch.fx.Node):
+        raise RuntimeError(f"unsupported cat inputs for node {node.name}")
+    return left.name, right.name
+
+
+def _cat_dim(node):
+    if "dim" in node.kwargs:
+        return node.kwargs["dim"]
+    if len(node.args) >= 2:
+        return node.args[1]
+    return 0
 
 
 def _shape_map(traced, example_input):
@@ -599,6 +731,14 @@ def _shape_map(traced, example_input):
                 if tuple(module.output_size) != (1, 1):
                     raise RuntimeError("only AdaptiveAvgPool2d((1, 1)) is supported")
                 shapes[node.name] = [input_shape[0], input_shape[1], 1, 1]
+            elif isinstance(module, torch.nn.AdaptiveMaxPool2d):
+                if len(input_shape) != 4:
+                    raise RuntimeError(f"unsupported AdaptiveMaxPool2d input shape: {input_shape}")
+                if tuple(module.output_size) != (1, 1):
+                    raise RuntimeError("only AdaptiveMaxPool2d((1, 1)) is supported")
+                if module.return_indices:
+                    raise RuntimeError("unsupported return_indices AdaptiveMaxPool2d")
+                shapes[node.name] = [input_shape[0], input_shape[1], 1, 1]
             elif isinstance(module, torch.nn.Flatten):
                 if module.start_dim != 1 or module.end_dim != -1:
                     raise RuntimeError("only Flatten(start_dim=1, end_dim=-1) is supported")
@@ -614,6 +754,17 @@ def _shape_map(traced, example_input):
                     torch.nn.Sigmoid,
                     torch.nn.Tanh,
                     torch.nn.LeakyReLU,
+                    torch.nn.Hardswish,
+                    torch.nn.Hardsigmoid,
+                    torch.nn.ReLU6,
+                    torch.nn.Softplus,
+                    torch.nn.ELU,
+                    torch.nn.SELU,
+                    torch.nn.CELU,
+                    torch.nn.Mish,
+                    torch.nn.Hardtanh,
+                    torch.nn.Softsign,
+                    torch.nn.LogSigmoid,
                     torch.nn.Dropout,
                     torch.nn.Dropout2d,
                     torch.nn.Identity,
@@ -626,9 +777,9 @@ def _shape_map(traced, example_input):
                 if list(module.normalized_shape) != [input_shape[-1]]:
                     raise RuntimeError("only last-dim LayerNorm is supported")
                 shapes[node.name] = input_shape
-            elif isinstance(module, torch.nn.Softmax):
+            elif isinstance(module, (torch.nn.Softmax, torch.nn.LogSoftmax)):
                 if module.dim not in (-1, len(input_shape) - 1):
-                    raise RuntimeError("only last-dim Softmax is supported")
+                    raise RuntimeError("only last-dim softmax is supported")
                 shapes[node.name] = input_shape
             elif isinstance(module, torch.nn.ReLU):
                 shapes[node.name] = input_shape
@@ -639,6 +790,16 @@ def _shape_map(traced, example_input):
             if shapes[left_name] != shapes[right_name]:
                 raise RuntimeError(f"mismatched binary input shapes for {node.name}")
             shapes[node.name] = shapes[left_name]
+        elif node.op == "call_function" and node.target is torch.cat:
+            left_name, right_name = _cat_input_names(node)
+            dim = _cat_dim(node)
+            left_shape = shapes[left_name]
+            right_shape = shapes[right_name]
+            if dim not in (-1, len(left_shape) - 1):
+                raise RuntimeError("only last-dim torch.cat is supported")
+            if left_shape[:-1] != right_shape[:-1]:
+                raise RuntimeError(f"mismatched torch.cat shapes for {node.name}")
+            shapes[node.name] = left_shape[:-1] + [left_shape[-1] + right_shape[-1]]
         else:
             raise RuntimeError(f"unsupported traced node: {node.op} {node.name}")
     return shapes
@@ -657,6 +818,17 @@ def _graph_program(traced, shapes):
                     "name": node.name,
                     "inputs": (left_name, right_name),
                     "mode": _binary_mode(node),
+                    "shape": shapes[node.name],
+                }
+            )
+            continue
+        if node.op == "call_function" and node.target is torch.cat:
+            left_name, right_name = _cat_input_names(node)
+            program.append(
+                {
+                    "kind": "cat",
+                    "name": node.name,
+                    "inputs": (left_name, right_name),
                     "shape": shapes[node.name],
                 }
             )
@@ -764,9 +936,36 @@ def _graph_program(traced, shapes):
                     "shape": shapes[node.name],
                 }
             )
+        elif isinstance(module, torch.nn.AdaptiveMaxPool2d):
+            program.append(
+                {
+                    "kind": "adaptive_maxpool2d",
+                    "name": node.name,
+                    "input": input_name,
+                    "input_shape": shapes[_predecessor_name(node)],
+                    "shape": shapes[node.name],
+                }
+            )
         elif isinstance(
             module,
-            (torch.nn.GELU, torch.nn.SiLU, torch.nn.Sigmoid, torch.nn.Tanh, torch.nn.LeakyReLU),
+            (
+                torch.nn.GELU,
+                torch.nn.SiLU,
+                torch.nn.Sigmoid,
+                torch.nn.Tanh,
+                torch.nn.LeakyReLU,
+                torch.nn.Hardswish,
+                torch.nn.Hardsigmoid,
+                torch.nn.ReLU6,
+                torch.nn.Softplus,
+                torch.nn.ELU,
+                torch.nn.SELU,
+                torch.nn.CELU,
+                torch.nn.Mish,
+                torch.nn.Hardtanh,
+                torch.nn.Softsign,
+                torch.nn.LogSigmoid,
+            ),
         ):
             mode, negative_slope = _activation_mode(module)
             program.append(
@@ -801,13 +1000,14 @@ def _graph_program(traced, shapes):
                     "shape": shapes[node.name],
                 }
             )
-        elif isinstance(module, torch.nn.Softmax):
+        elif isinstance(module, (torch.nn.Softmax, torch.nn.LogSoftmax)):
             program.append(
                 {
                     "kind": "softmax",
                     "name": node.name,
                     "input": input_name,
                     "normalized_size": shapes[input_name][-1],
+                    "log": isinstance(module, torch.nn.LogSoftmax),
                     "shape": shapes[node.name],
                 }
             )
@@ -966,8 +1166,16 @@ def _adaptive_avg_pool_index(adaptive_avg_pools, op):
     return next(index for index, candidate in enumerate(adaptive_avg_pools) if candidate is op)
 
 
+def _adaptive_max_pool_index(adaptive_max_pools, op):
+    return next(index for index, candidate in enumerate(adaptive_max_pools) if candidate is op)
+
+
 def _binary_index(binaries, op):
     return next(index for index, candidate in enumerate(binaries) if candidate is op)
+
+
+def _cat_index(cats, op):
+    return next(index for index, candidate in enumerate(cats) if candidate is op)
 
 
 def _layer_norm_index(layer_norms, op):
@@ -999,7 +1207,9 @@ def generate_native_runner(args: argparse.Namespace, output_path: pathlib.Path) 
     max_pools = [op for op in program if op["kind"] == "maxpool2d"]
     avg_pools = [op for op in program if op["kind"] == "avgpool2d"]
     adaptive_avg_pools = [op for op in program if op["kind"] == "adaptive_avgpool2d"]
+    adaptive_max_pools = [op for op in program if op["kind"] == "adaptive_maxpool2d"]
     binaries = [op for op in program if op["kind"] == "binary"]
+    cats = [op for op in program if op["kind"] == "cat"]
     layer_norms = [op for op in program if op["kind"] == "layernorm"]
     softmaxes = [op for op in program if op["kind"] == "softmax"]
     weighted = [op for op in program if op["kind"] in ("linear", "conv2d")]
@@ -1175,6 +1385,21 @@ def generate_native_runner(args: argparse.Namespace, output_path: pathlib.Path) 
         )
         ptx_by_key[f"adaptive_avgpool2d_{index}"] = ptx
 
+    for index, op in enumerate(adaptive_max_pools):
+        n, c, h, w = op["input_shape"]
+        x = torch.randn(n, c, h, w, device="cuda", dtype=torch.float32)
+        out = torch.empty(n * c, device="cuda", dtype=torch.float32)
+        ptx = _compile_kernel(
+            adaptive_maxpool2d_1x1_kernel,
+            (n * c,),
+            (x, out),
+            {"H": h, "W": w, "num_warps": 1},
+        ).replace(
+            "adaptive_maxpool2d_1x1_kernel",
+            f"adaptive_maxpool2d_{index}_kernel",
+        )
+        ptx_by_key[f"adaptive_maxpool2d_{index}"] = ptx
+
     for index, op in enumerate(binaries):
         count = _numel(op["shape"])
         a = torch.empty(count, device="cuda", dtype=torch.float32)
@@ -1191,6 +1416,28 @@ def generate_native_runner(args: argparse.Namespace, output_path: pathlib.Path) 
             },
         ).replace("binary_kernel", f"binary_{index}_kernel")
         ptx_by_key[f"binary_{index}"] = ptx
+
+    for index, op in enumerate(cats):
+        left_shape = shapes[op["inputs"][0]]
+        right_shape = shapes[op["inputs"][1]]
+        a_inner = left_shape[-1]
+        b_inner = right_shape[-1]
+        count = _numel(op["shape"])
+        a = torch.empty(count, device="cuda", dtype=torch.float32)
+        b = torch.empty(count, device="cuda", dtype=torch.float32)
+        out = torch.empty(count, device="cuda", dtype=torch.float32)
+        ptx = _compile_kernel(
+            concat_last_kernel,
+            (1,),
+            (a, b, out, count),
+            {
+                "BLOCK": args.block,
+                "A_INNER": a_inner,
+                "B_INNER": b_inner,
+                "num_warps": 1,
+            },
+        ).replace("concat_last_kernel", f"cat_{index}_kernel")
+        ptx_by_key[f"cat_{index}"] = ptx
 
     for index, op in enumerate(layer_norms):
         n = op["normalized_size"]
@@ -1216,7 +1463,7 @@ def generate_native_runner(args: argparse.Namespace, output_path: pathlib.Path) 
             softmax_kernel,
             (count,),
             (x, out),
-            {"N": n, "num_warps": 1},
+            {"N": n, "log": op["log"], "num_warps": 1},
         ).replace("softmax_kernel", f"softmax_{index}_kernel")
         ptx_by_key[f"softmax_{index}"] = ptx
 
@@ -1235,7 +1482,9 @@ def generate_native_runner(args: argparse.Namespace, output_path: pathlib.Path) 
             max_pools,
             avg_pools,
             adaptive_avg_pools,
+            adaptive_max_pools,
             binaries,
+            cats,
             layer_norms,
             softmaxes,
             weighted,
@@ -1258,7 +1507,9 @@ def _generate_cpp(
     max_pools,
     avg_pools,
     adaptive_avg_pools,
+    adaptive_max_pools,
     binaries,
+    cats,
     layer_norms,
     softmaxes,
     weighted,
@@ -1301,9 +1552,17 @@ def _generate_cpp(
             f"""  CUfunction adaptive_avgpool{index}_fn = load_function(
       R"CUPTX({ptx_by_key[f"adaptive_avgpool2d_{index}"]})CUPTX", "adaptive_avgpool2d_{index}_kernel");"""
         )
+    for index, _ in enumerate(adaptive_max_pools):
+        function_loads.append(
+            f"""  CUfunction adaptive_maxpool{index}_fn = load_function(
+      R"CUPTX({ptx_by_key[f"adaptive_maxpool2d_{index}"]})CUPTX", "adaptive_maxpool2d_{index}_kernel");"""
+        )
     for index, _ in enumerate(binaries):
         function_loads.append(f"""  CUfunction binary{index}_fn = load_function(
       R"CUPTX({ptx_by_key[f"binary_{index}"]})CUPTX", "binary_{index}_kernel");""")
+    for index, _ in enumerate(cats):
+        function_loads.append(f"""  CUfunction cat{index}_fn = load_function(
+      R"CUPTX({ptx_by_key[f"cat_{index}"]})CUPTX", "cat_{index}_kernel");""")
     for index, _ in enumerate(layer_norms):
         function_loads.append(f"""  CUfunction layernorm{index}_fn = load_function(
       R"CUPTX({ptx_by_key[f"layernorm_{index}"]})CUPTX", "layernorm_{index}_kernel");""")
@@ -1322,7 +1581,9 @@ def _generate_cpp(
             + [f"!maxpool{index}_fn" for index in range(len(max_pools))]
             + [f"!avgpool{index}_fn" for index in range(len(avg_pools))]
             + [f"!adaptive_avgpool{index}_fn" for index in range(len(adaptive_avg_pools))]
+            + [f"!adaptive_maxpool{index}_fn" for index in range(len(adaptive_max_pools))]
             + [f"!binary{index}_fn" for index in range(len(binaries))]
+            + [f"!cat{index}_fn" for index in range(len(cats))]
             + [f"!layernorm{index}_fn" for index in range(len(layer_norms))]
             + [f"!softmax{index}_fn" for index in range(len(softmaxes))]
         )
@@ -1472,6 +1733,17 @@ def _generate_cpp(
     return 16;
   }}""")
             continue
+        if op["kind"] == "cat":
+            cat_index = _cat_index(cats, op)
+            left_name, right_name = op["inputs"]
+            left_var = "d_input" if left_name == placeholder.name else _buffer_name(left_name)
+            right_var = "d_input" if right_name == placeholder.name else _buffer_name(right_name)
+            count = _numel(op["shape"])
+            launches.append(f"""  if (!launch_cat(cat{cat_index}_fn, {left_var},
+                       {right_var}, {output_var}, {count}, {args.block})) {{
+    return 20;
+  }}""")
+            continue
         input_var = "d_input" if op["input"] == placeholder.name else _buffer_name(op["input"])
         if op["kind"] == "linear":
             linear_index = _linear_index(linears, op)
@@ -1531,6 +1803,15 @@ def _generate_cpp(
                 f"""  if (!launch_adaptive_avgpool(adaptive_avgpool{adaptive_pool_index}_fn,
                        {input_var}, {output_var}, {batch_channels})) {{
     return 13;
+  }}"""
+            )
+        elif op["kind"] == "adaptive_maxpool2d":
+            adaptive_pool_index = _adaptive_max_pool_index(adaptive_max_pools, op)
+            batch_channels = _numel(op["shape"])
+            launches.append(
+                f"""  if (!launch_adaptive_maxpool(adaptive_maxpool{adaptive_pool_index}_fn,
+                       {input_var}, {output_var}, {batch_channels})) {{
+    return 19;
   }}"""
             )
         elif op["kind"] == "relu":
@@ -1653,9 +1934,30 @@ def _generate_cpp(
                               static_cast<unsigned int>(batch_channels), 1, 1,
                               32, 1, 1, 0, nullptr, params, nullptr));
 }""")
+    if adaptive_max_pools:
+        launch_helpers.append("""bool launch_adaptive_maxpool(CUfunction function, CUdeviceptr x,
+                              CUdeviceptr out, int batch_channels) {
+  CUdeviceptr scratch = 0;
+  void *params[] = {&x, &out, &scratch};
+  return check(cuLaunchKernel(function,
+                              static_cast<unsigned int>(batch_channels), 1, 1,
+                              32, 1, 1, 0, nullptr, params, nullptr));
+}""")
     if binaries:
         launch_helpers.append("""bool launch_binary(CUfunction function, CUdeviceptr x,
                    CUdeviceptr y, CUdeviceptr out, int count, int block) {
+  CUdeviceptr scratch = 0;
+  void *params[] = {&x, &y, &out, &count, &scratch};
+  const unsigned int grid =
+      (static_cast<unsigned int>(count) + static_cast<unsigned int>(block) - 1) /
+      static_cast<unsigned int>(block);
+  return check(cuLaunchKernel(function, grid, 1, 1,
+                              static_cast<unsigned int>(block), 1, 1, 0,
+                              nullptr, params, nullptr));
+}""")
+    if cats:
+        launch_helpers.append("""bool launch_cat(CUfunction function, CUdeviceptr x,
+                 CUdeviceptr y, CUdeviceptr out, int count, int block) {
   CUdeviceptr scratch = 0;
   void *params[] = {&x, &y, &out, &count, &scratch};
   const unsigned int grid =
