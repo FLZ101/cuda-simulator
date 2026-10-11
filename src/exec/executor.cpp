@@ -925,6 +925,33 @@ bool execute_instruction(
     return true;
   }
 
+  if (opcode == "mad.wide.s32" || opcode == "mad.wide.u32") {
+    std::size_t pos = 0;
+    auto dst = parse_register(instruction.operand_tokens, pos);
+    auto a = parse_register(instruction.operand_tokens, pos);
+    auto b =
+        parse_u32_operand(instruction.operand_tokens, pos, registers, lane);
+    auto c = parse_register(instruction.operand_tokens, pos);
+    if (!dst || !a || !b || !c) {
+      return false;
+    }
+    const bool is_signed = opcode == "mad.wide.s32";
+    const std::uint64_t av =
+        is_signed
+            ? static_cast<std::uint64_t>(static_cast<std::int64_t>(
+                  static_cast<std::int32_t>(registers.values[a->index][lane])))
+            : static_cast<std::uint64_t>(
+                  static_cast<std::uint32_t>(registers.values[a->index][lane]));
+    const std::uint64_t bv =
+        is_signed ? static_cast<std::uint64_t>(static_cast<std::int64_t>(
+                        static_cast<std::int32_t>(*b)))
+                  : static_cast<std::uint64_t>(*b);
+    const std::uint64_t cv = registers.values[c->index][lane];
+    registers.values[dst->index][lane] = av * bv + cv;
+    next_pc = pc + 1;
+    return true;
+  }
+
   if (opcode == "add.s64") {
     std::size_t pos = 0;
     auto dst = parse_register(instruction.operand_tokens, pos);
@@ -1499,11 +1526,38 @@ bool execute_instruction(
     return true;
   }
 
-  if (opcode == "mov.u64") {
+  if (opcode == "mov.u64" || opcode == "mov.b64") {
     std::size_t pos = 0;
     auto dst = parse_register(instruction.operand_tokens, pos);
+    if (!dst) {
+      return false;
+    }
+    while (pos < instruction.operand_tokens.size() &&
+           instruction.operand_tokens[pos].kind ==
+               cudasim::ptx::TokenKind::Comma) {
+      ++pos;
+    }
+    bool negative = false;
+    if (pos < instruction.operand_tokens.size() &&
+        instruction.operand_tokens[pos].kind ==
+            cudasim::ptx::TokenKind::Minus) {
+      negative = true;
+      ++pos;
+    }
+    if (pos < instruction.operand_tokens.size() &&
+        instruction.operand_tokens[pos].kind ==
+            cudasim::ptx::TokenKind::Number) {
+      const std::uint64_t value = static_cast<std::uint64_t>(
+          std::stoull(instruction.operand_tokens[pos].text));
+      registers.values[dst->index][lane] =
+          negative
+              ? static_cast<std::uint64_t>(-static_cast<std::int64_t>(value))
+              : value;
+      next_pc = pc + 1;
+      return true;
+    }
     auto src = parse_register(instruction.operand_tokens, pos);
-    if (!dst || !src) {
+    if (!src) {
       return false;
     }
     registers.values[dst->index][lane] = registers.values[src->index][lane];
@@ -1603,7 +1657,8 @@ bool execute_instruction(
 
   if (opcode == "setp.eq.s64" || opcode == "setp.ne.s64" ||
       opcode == "setp.lt.s64" || opcode == "setp.le.s64" ||
-      opcode == "setp.gt.s64" || opcode == "setp.ge.s64") {
+      opcode == "setp.gt.s64" || opcode == "setp.ge.s64" ||
+      opcode == "setp.eq.b64" || opcode == "setp.ne.b64") {
     std::size_t pos = 0;
     if (pos >= instruction.operand_tokens.size() ||
         instruction.operand_tokens[pos].kind !=
@@ -1652,9 +1707,9 @@ bool execute_instruction(
     const std::uint64_t av = registers.values[a->index][lane];
     const auto av_signed = static_cast<std::int64_t>(av);
     const auto bv_signed = static_cast<std::int64_t>(bv);
-    if (opcode == "setp.eq.s64") {
+    if (opcode == "setp.eq.s64" || opcode == "setp.eq.b64") {
       registers.predicates[pred_index][lane] = av == bv;
-    } else if (opcode == "setp.ne.s64") {
+    } else if (opcode == "setp.ne.s64" || opcode == "setp.ne.b64") {
       registers.predicates[pred_index][lane] = av != bv;
     } else if (opcode == "setp.lt.s64") {
       registers.predicates[pred_index][lane] = av_signed < bv_signed;
@@ -1760,6 +1815,19 @@ bool execute_instruction(
     }
     registers.values[dst->index][lane] =
         static_cast<std::uint64_t>(static_cast<std::int32_t>(*src));
+    next_pc = pc + 1;
+    return true;
+  }
+
+  if (opcode == "cvt.u64.u32") {
+    std::size_t pos = 0;
+    auto dst = parse_register(instruction.operand_tokens, pos);
+    auto src =
+        parse_u32_operand(instruction.operand_tokens, pos, registers, lane);
+    if (!dst || !src) {
+      return false;
+    }
+    registers.values[dst->index][lane] = static_cast<std::uint64_t>(*src);
     next_pc = pc + 1;
     return true;
   }
