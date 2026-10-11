@@ -34,6 +34,8 @@ tests/models/generate_model_runner.py
 tests/models/specs/vector_add.py
 tests/models/specs/matmul.py
 tests/models/specs/mlp.py
+tests/models/specs/module.py
+tests/models/fixtures/mlp_module.py
 ```
 
 ## Acceptance Checks
@@ -511,6 +513,16 @@ Comparison requirements:
 - verification: `models.mlp.runner_cpu`, `models.mlp.runner_sim`, all six
   `models.*.runner_*` tests, and the full 34-test CTest suite pass.
 
+- Added a traced-module runner spec. `models/specs/module.py` imports a Python
+  model definition, traces it with `torch.fx`, lowers supported `Linear` and
+  `ReLU` modules to uniquely named Triton SIMT kernels, and emits the
+  standalone CUDA host runner. The MLP fixture exercises the path through
+  `models.module.runner_cpu` and `models.module.runner_sim`.
+- files: `tests/models/specs/module.py`,
+  `tests/models/fixtures/mlp_module.py`, `tests/CMakeLists.txt`
+- verification: `models.module.runner_cpu`, `models.module.runner_sim`, all
+  eight `models.*.runner_*` tests, and the full 36-test CTest suite pass.
+
 ## Verification
 
 Commands run:
@@ -519,14 +531,14 @@ Commands run:
 cmake --build build -j 4
 ctest --test-dir build -R kernels.gpu_reference_differential_detection --output-on-failure
 ctest --test-dir build -R kernels.gpu_reference_differential_sequence --output-on-failure
-ctest --test-dir build -R 'models\.(vector_add|matmul|mlp)\.runner_(cpu|sim)' --output-on-failure
+ctest --test-dir build -R 'models\.(vector_add|matmul|mlp|module)\.runner_(cpu|sim)' --output-on-failure
 ctest --test-dir build --output-on-failure
 ```
 
 Result:
 
 ```text
-100% tests passed, 0 tests failed out of 34
+100% tests passed, 0 tests failed out of 36
 ```
 
 Required before Step 9:

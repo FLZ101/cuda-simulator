@@ -636,8 +636,10 @@ Current status:
 - Step 8's `nvcc` operator execution qualification is implemented and green:
   generated kernels are grouped into operator families and tested through one
   CTest target per group with the real GPU as golden reference, including
-  `detection` and `sequence` kernels. The remaining Step 8 work is the simple
-  PyTorch-generated model CPU-reference flow.
+  `detection` and `sequence` kernels. The simple PyTorch-generated model
+  CPU-reference flow is also green for vector-add, matmul, MLP, and a traced
+  `torch.fx` module spec that lowers supported `Linear`/`ReLU` graphs to
+  embedded Triton SIMT PTX.
 - Future work: replace the fixed 1024-entry virtual-register banks with a
   `.reg`-declaration-driven `RegisterLayout` at PTX lowering. The current
   direct mapping is sufficient for the existing corpus; a dynamic layout is

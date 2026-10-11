@@ -680,6 +680,63 @@ add_test(
           --output-dir ${CMAKE_CURRENT_BINARY_DIR}/models/mlp
 )
 
+set(MODULE_RUNNER_SRC ${GENERATED_MODEL_DIR}/module_runner.cu)
+set(MODULE_MODEL_FIXTURE
+  ${CMAKE_CURRENT_SOURCE_DIR}/models/fixtures/mlp_module.py)
+
+add_custom_command(
+  OUTPUT ${MODULE_RUNNER_SRC}
+  COMMAND ${SIM_PYTHON} ${CMAKE_CURRENT_SOURCE_DIR}/models/generate_model_runner.py
+          --spec module
+          --output-cpp ${MODULE_RUNNER_SRC}
+          --module-file ${MODULE_MODEL_FIXTURE}
+          --batch 4
+          --in-features 16
+          --hidden 32
+          --out-features 8
+          --block 32
+  DEPENDS
+    ${CMAKE_CURRENT_SOURCE_DIR}/models/generate_model_runner.py
+    ${CMAKE_CURRENT_SOURCE_DIR}/models/specs/module.py
+    ${MODULE_MODEL_FIXTURE}
+  VERBATIM
+)
+
+add_executable(module_model_runner ${MODULE_RUNNER_SRC})
+set_target_properties(module_model_runner PROPERTIES
+  CUDA_STANDARD 20
+  CUDA_STANDARD_REQUIRED ON
+  CUDA_ARCHITECTURES 86
+)
+target_link_libraries(module_model_runner PRIVATE CUDA::cuda_driver)
+
+add_test(
+  NAME models.module.runner_cpu
+  COMMAND ${SIM_PYTHON} ${CMAKE_CURRENT_SOURCE_DIR}/models/model_runner.py
+          --spec module
+          --mode cpu
+          --module-file ${MODULE_MODEL_FIXTURE}
+          --runner $<TARGET_FILE:module_model_runner>
+          --cudart $<TARGET_FILE:cudart_shim>
+          --cuda $<TARGET_FILE:cuda_shim>
+          --core-dir $<TARGET_FILE_DIR:cudasim_core>
+          --output-dir ${CMAKE_CURRENT_BINARY_DIR}/models/module
+)
+add_test(
+  NAME models.module.runner_sim
+  COMMAND ${SIM_PYTHON} ${CMAKE_CURRENT_SOURCE_DIR}/models/model_runner.py
+          --spec module
+          --mode gpu
+          --simulate
+          --compare
+          --module-file ${MODULE_MODEL_FIXTURE}
+          --runner $<TARGET_FILE:module_model_runner>
+          --cudart $<TARGET_FILE:cudart_shim>
+          --cuda $<TARGET_FILE:cuda_shim>
+          --core-dir $<TARGET_FILE_DIR:cudasim_core>
+          --output-dir ${CMAKE_CURRENT_BINARY_DIR}/models/module
+)
+
 add_executable(runtime_api_smoke
   compat/runtime_api_smoke.cpp
 )
