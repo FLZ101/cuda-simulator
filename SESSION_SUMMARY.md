@@ -24,6 +24,10 @@ embedded Triton PTX; `--mode cpu` runs the PyTorch model on CPU, while
 `--mode gpu --simulate` runs the native runner under the CUDA shims. The runner
 never takes PTX text as input.
 
+The traced-module spec currently lowers `nn.Linear`, `nn.Conv2d`, `nn.ReLU`,
+`nn.BatchNorm2d`, and `nn.MaxPool2d`; a ResNet-stem fixture covers the CNN
+sequence `Conv2d -> BatchNorm2d -> ReLU -> MaxPool2d`.
+
 Build:
 
 ```bash
@@ -159,6 +163,9 @@ bank, so generated indices such as `r716` do not alias `rd` or `f` registers.
 - `tests/models/specs/module.py`
 - `tests/models/fixtures/mlp_module.py`
 - `tests/models/fixtures/conv_module.py`
+- `tests/models/fixtures/resnet_stem.py`
+- `tests/ptx/scalar_math_kernel.ptx`
+- `tests/ptx/scalar_math_exec_smoke.cpp`
 - `tests/CMakeLists.txt`
 
 ## Next Steps

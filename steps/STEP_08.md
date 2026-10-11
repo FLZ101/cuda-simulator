@@ -37,6 +37,9 @@ tests/models/specs/mlp.py
 tests/models/specs/module.py
 tests/models/fixtures/mlp_module.py
 tests/models/fixtures/conv_module.py
+tests/models/fixtures/resnet_stem.py
+tests/ptx/scalar_math_kernel.ptx
+tests/ptx/scalar_math_exec_smoke.cpp
 ```
 
 ## Acceptance Checks
@@ -536,6 +539,19 @@ Comparison requirements:
   `models.conv_module.runner_sim`, all ten `models.*.runner_*` tests, and the
   full 38-test CTest suite pass.
 
+- Extended the traced-module runner to lower `nn.BatchNorm2d`, `nn.MaxPool2d`,
+  and bias-free `nn.Conv2d`, with a ResNet-stem fixture exercising all four
+  CNN operators. Triton emitted `div.full.f32` and `sqrt.approx.ftz.f32` for
+  batch normalization, so those opcodes were added to the interpreter with a
+  focused raw-PTX regression.
+- files: `tests/models/specs/module.py`,
+  `tests/models/fixtures/resnet_stem.py`, `tests/CMakeLists.txt`,
+  `src/exec/executor.cpp`, `tests/ptx/scalar_math_kernel.ptx`,
+  `tests/ptx/scalar_math_exec_smoke.cpp`
+- verification: `models.resnet_stem.runner_cpu`,
+  `models.resnet_stem.runner_sim`, `ptx.scalar_math_exec_smoke`, all
+  model-runner tests, and the full 41-test CTest suite pass.
+
 ## Verification
 
 Commands run:
@@ -544,14 +560,14 @@ Commands run:
 cmake --build build -j 4
 ctest --test-dir build -R kernels.gpu_reference_differential_detection --output-on-failure
 ctest --test-dir build -R kernels.gpu_reference_differential_sequence --output-on-failure
-ctest --test-dir build -R 'models\.(vector_add|matmul|mlp|module|conv_module)\.runner_(cpu|sim)' --output-on-failure
+ctest --test-dir build -R 'models\.(vector_add|matmul|mlp|module|conv_module|resnet_stem)\.runner_(cpu|sim)' --output-on-failure
 ctest --test-dir build --output-on-failure
 ```
 
 Result:
 
 ```text
-100% tests passed, 0 tests failed out of 38
+100% tests passed, 0 tests failed out of 41
 ```
 
 Required before Step 9:

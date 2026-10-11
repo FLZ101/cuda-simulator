@@ -77,6 +77,68 @@ def conv2d_kernel(
     )
 
 
+@triton.jit
+def batchnorm2d_kernel(
+    x_ptr,
+    weight_ptr,
+    bias_ptr,
+    mean_ptr,
+    var_ptr,
+    out_ptr,
+    C: tl.constexpr,
+    H: tl.constexpr,
+    W: tl.constexpr,
+    eps: tl.constexpr,
+):
+    pid = tl.program_id(0)
+    hw = H * W
+    c = (pid // hw) % C
+    x = tl.load(x_ptr + pid)
+    weight = tl.load(weight_ptr + c)
+    bias = tl.load(bias_ptr + c)
+    mean = tl.load(mean_ptr + c)
+    var = tl.load(var_ptr + c)
+    y = ((x - mean) / tl.sqrt(var + eps)) * weight + bias
+    tl.store(out_ptr + pid, y)
+
+
+@triton.jit
+def maxpool2d_kernel(
+    x_ptr,
+    out_ptr,
+    C: tl.constexpr,
+    H: tl.constexpr,
+    W: tl.constexpr,
+    KH: tl.constexpr,
+    KW: tl.constexpr,
+    stride: tl.constexpr,
+    pad: tl.constexpr,
+):
+    pid = tl.program_id(0)
+    oh = tl.program_id(1)
+    ow = tl.program_id(2)
+    n = pid // C
+    c = pid % C
+    out_h = (H + 2 * pad - KH) // stride + 1
+    out_w = (W + 2 * pad - KW) // stride + 1
+    acc = float("-inf")
+    for r in tl.range(0, KH):
+        for s in tl.range(0, KW):
+            ih = oh * stride - pad + r
+            iw = ow * stride - pad + s
+            in_bounds = (ih >= 0) & (ih < H) & (iw >= 0) & (iw < W)
+            value = tl.load(
+                x_ptr + ((n * C + c) * H + ih) * W + iw,
+                mask=in_bounds,
+                other=float("-inf"),
+            )
+            acc = tl.maximum(acc, value)
+    tl.store(
+        out_ptr + ((n * C + c) * out_h + oh) * out_w + ow,
+        acc,
+    )
+
+
 def add_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--module-file", required=True)
     parser.add_argument("--batch", type=int, default=4)
@@ -161,6 +223,48 @@ def _weighted_nodes(traced):
             yield node, module
 
 
+def _batch_norm_nodes(traced):
+    for node in traced.graph.nodes:
+        if node.op != "call_module":
+            continue
+        module = traced.get_submodule(node.target)
+        if isinstance(module, torch.nn.BatchNorm2d):
+            yield node, module
+
+
+def _max_pool_nodes(traced):
+    for node in traced.graph.nodes:
+        if node.op != "call_module":
+            continue
+        module = traced.get_submodule(node.target)
+        if isinstance(module, torch.nn.MaxPool2d):
+            yield node, module
+
+
+def _square_pair(module, name):
+    value = getattr(module, name)
+    if isinstance(value, int):
+        value = (value, value)
+    if value[0] != value[1]:
+        raise RuntimeError(f"unsupported non-square {type(module).__name__} {name}: {value}")
+    return value[0]
+
+
+def _dilation_pair(module):
+    value = module.dilation
+    if isinstance(value, int):
+        value = (value, value)
+    return value
+
+
+def _module_bias(module):
+    if module.bias is not None:
+        return module.bias
+    if isinstance(module, torch.nn.Linear):
+        return torch.zeros(module.out_features, dtype=torch.float32)
+    return torch.zeros(module.out_channels, dtype=torch.float32)
+
+
 def _predecessor_name(node):
     value = node.args[0]
     if not isinstance(value, torch.fx.Node):
@@ -185,10 +289,19 @@ def _shape_map(traced, example_input):
             elif isinstance(module, torch.nn.Conv2d):
                 if len(input_shape) != 4:
                     raise RuntimeError(f"unsupported Conv2d input shape: {input_shape}")
-                kernel_h, kernel_w = module.kernel_size
-                stride_h, stride_w = module.stride
-                pad_h, pad_w = module.padding
-                dilation_h, dilation_w = module.dilation
+                if module.groups != 1:
+                    raise RuntimeError("unsupported grouped Conv2d")
+                if module.padding_mode != "zeros":
+                    raise RuntimeError("unsupported non-zero Conv2d padding mode")
+                if _dilation_pair(module) != (1, 1):
+                    raise RuntimeError("unsupported dilated Conv2d")
+                kernel_h = _square_pair(module, "kernel_size")
+                kernel_w = kernel_h
+                stride_h = _square_pair(module, "stride")
+                stride_w = stride_h
+                pad_h = _square_pair(module, "padding")
+                pad_w = pad_h
+                dilation_h, dilation_w = 1, 1
                 out_h = (
                     input_shape[2] + 2 * pad_h - dilation_h * (kernel_h - 1) - 1
                 ) // stride_h + 1
@@ -201,6 +314,30 @@ def _shape_map(traced, example_input):
                     out_h,
                     out_w,
                 ]
+            elif isinstance(module, torch.nn.BatchNorm2d):
+                if len(input_shape) != 4:
+                    raise RuntimeError(f"unsupported BatchNorm2d input shape: {input_shape}")
+                if not module.track_running_stats:
+                    raise RuntimeError("BatchNorm2d requires track_running_stats=True")
+                shapes[node.name] = input_shape
+            elif isinstance(module, torch.nn.MaxPool2d):
+                if len(input_shape) != 4:
+                    raise RuntimeError(f"unsupported MaxPool2d input shape: {input_shape}")
+                if module.ceil_mode:
+                    raise RuntimeError("unsupported ceil_mode MaxPool2d")
+                if module.return_indices:
+                    raise RuntimeError("unsupported return_indices MaxPool2d")
+                if _dilation_pair(module) != (1, 1):
+                    raise RuntimeError("unsupported dilated MaxPool2d")
+                kernel_h = _square_pair(module, "kernel_size")
+                kernel_w = kernel_h
+                stride_h = _square_pair(module, "stride")
+                stride_w = stride_h
+                pad_h = _square_pair(module, "padding")
+                pad_w = pad_h
+                out_h = (input_shape[2] + 2 * pad_h - (kernel_h - 1) - 1) // stride_h + 1
+                out_w = (input_shape[3] + 2 * pad_w - (kernel_w - 1) - 1) // stride_w + 1
+                shapes[node.name] = [input_shape[0], input_shape[1], out_h, out_w]
             elif isinstance(module, torch.nn.ReLU):
                 shapes[node.name] = input_shape
             else:
@@ -229,9 +366,12 @@ def _graph_program(traced, shapes):
                 }
             )
         elif isinstance(module, torch.nn.Conv2d):
-            kernel_h, kernel_w = module.kernel_size
-            stride_h, stride_w = module.stride
-            pad_h, pad_w = module.padding
+            kernel_h = _square_pair(module, "kernel_size")
+            kernel_w = kernel_h
+            stride_h = _square_pair(module, "stride")
+            stride_w = stride_h
+            pad_h = _square_pair(module, "padding")
+            pad_w = pad_h
             program.append(
                 {
                     "kind": "conv2d",
@@ -239,6 +379,40 @@ def _graph_program(traced, shapes):
                     "input": input_name,
                     "in_channels": module.in_channels,
                     "out_channels": module.out_channels,
+                    "kernel_h": kernel_h,
+                    "kernel_w": kernel_w,
+                    "stride_h": stride_h,
+                    "stride_w": stride_w,
+                    "pad_h": pad_h,
+                    "pad_w": pad_w,
+                    "input_shape": shapes[_predecessor_name(node)],
+                    "shape": shapes[node.name],
+                }
+            )
+        elif isinstance(module, torch.nn.BatchNorm2d):
+            program.append(
+                {
+                    "kind": "batchnorm2d",
+                    "name": node.name,
+                    "input": input_name,
+                    "channels": module.num_features,
+                    "eps": module.eps,
+                    "input_shape": shapes[_predecessor_name(node)],
+                    "shape": shapes[node.name],
+                }
+            )
+        elif isinstance(module, torch.nn.MaxPool2d):
+            kernel_h = _square_pair(module, "kernel_size")
+            kernel_w = kernel_h
+            stride_h = _square_pair(module, "stride")
+            stride_w = stride_h
+            pad_h = _square_pair(module, "padding")
+            pad_w = pad_h
+            program.append(
+                {
+                    "kind": "maxpool2d",
+                    "name": node.name,
+                    "input": input_name,
                     "kernel_h": kernel_h,
                     "kernel_w": kernel_w,
                     "stride_h": stride_h,
@@ -285,14 +459,31 @@ def run_cpu(args: argparse.Namespace, output_dir: pathlib.Path) -> None:
     traced = _trace(model)
     for index, (_, module) in enumerate(_weighted_nodes(traced)):
         _write_floats(output_dir / f"weight{index}.bin", module.weight)
-        if module.bias is not None:
-            _write_floats(output_dir / f"bias{index}.bin", module.bias)
+        _write_floats(output_dir / f"bias{index}.bin", _module_bias(module))
+    for index, (_, module) in enumerate(_batch_norm_nodes(traced)):
+        weight = module.weight if module.weight is not None else torch.ones(module.num_features)
+        bias = module.bias if module.bias is not None else torch.zeros(module.num_features)
+        mean = (
+            module.running_mean
+            if module.running_mean is not None
+            else torch.zeros(module.num_features)
+        )
+        var = (
+            module.running_var
+            if module.running_var is not None
+            else torch.ones(module.num_features)
+        )
+        _write_floats(output_dir / f"bn_weight{index}.bin", weight)
+        _write_floats(output_dir / f"bn_bias{index}.bin", bias)
+        _write_floats(output_dir / f"bn_mean{index}.bin", mean)
+        _write_floats(output_dir / f"bn_var{index}.bin", var)
 
 
 def native_arguments(args: argparse.Namespace, output_dir: pathlib.Path) -> list[str]:
     model, _ = _build_model(args)
     traced = _trace(model)
     weighted = list(_weighted_nodes(traced))
+    batch_norms = list(_batch_norm_nodes(traced))
     arguments = [
         "--input",
         str(output_dir / "input.bin"),
@@ -306,6 +497,19 @@ def native_arguments(args: argparse.Namespace, output_dir: pathlib.Path) -> list
                 str(output_dir / f"weight{index}.bin"),
                 f"--bias{index}",
                 str(output_dir / f"bias{index}.bin"),
+            ]
+        )
+    for index, _ in enumerate(batch_norms):
+        arguments.extend(
+            [
+                f"--bn-weight{index}",
+                str(output_dir / f"bn_weight{index}.bin"),
+                f"--bn-bias{index}",
+                str(output_dir / f"bn_bias{index}.bin"),
+                f"--bn-mean{index}",
+                str(output_dir / f"bn_mean{index}.bin"),
+                f"--bn-var{index}",
+                str(output_dir / f"bn_var{index}.bin"),
             ]
         )
     return arguments
@@ -334,6 +538,14 @@ def _relu_index(relus, op):
     return next(index for index, candidate in enumerate(relus) if candidate is op)
 
 
+def _batch_norm_index(batch_norms, op):
+    return next(index for index, candidate in enumerate(batch_norms) if candidate is op)
+
+
+def _max_pool_index(max_pools, op):
+    return next(index for index, candidate in enumerate(max_pools) if candidate is op)
+
+
 def _weighted_index(weighted_ops, op):
     return next(index for index, candidate in enumerate(weighted_ops) if candidate is op)
 
@@ -349,6 +561,8 @@ def generate_native_runner(args: argparse.Namespace, output_path: pathlib.Path) 
     linears = [op for op in program if op["kind"] == "linear"]
     convs = [op for op in program if op["kind"] == "conv2d"]
     relus = [op for op in program if op["kind"] == "relu"]
+    batch_norms = [op for op in program if op["kind"] == "batchnorm2d"]
+    max_pools = [op for op in program if op["kind"] == "maxpool2d"]
     weighted = [op for op in program if op["kind"] in ("linear", "conv2d")]
 
     ptx_by_key = {}
@@ -411,6 +625,51 @@ def generate_native_runner(args: argparse.Namespace, output_path: pathlib.Path) 
         ).replace("relu_kernel", f"relu_{index}_kernel")
         ptx_by_key[f"relu_{index}"] = ptx
 
+    for index, op in enumerate(batch_norms):
+        n, c, h, w = op["input_shape"]
+        count = n * c * h * w
+        x = torch.randn(count, device="cuda", dtype=torch.float32)
+        weight = torch.randn(c, device="cuda", dtype=torch.float32)
+        bias = torch.randn(c, device="cuda", dtype=torch.float32)
+        mean = torch.randn(c, device="cuda", dtype=torch.float32)
+        var = torch.rand(c, device="cuda", dtype=torch.float32) + 1.0
+        out = torch.empty(count, device="cuda", dtype=torch.float32)
+        ptx = _compile_kernel(
+            batchnorm2d_kernel,
+            (count,),
+            (x, weight, bias, mean, var, out),
+            {
+                "C": c,
+                "H": h,
+                "W": w,
+                "eps": op["eps"],
+                "num_warps": 1,
+            },
+        ).replace("batchnorm2d_kernel", f"batchnorm2d_{index}_kernel")
+        ptx_by_key[f"batchnorm2d_{index}"] = ptx
+
+    for index, op in enumerate(max_pools):
+        n, c, h, w = op["input_shape"]
+        out_h, out_w = op["shape"][2], op["shape"][3]
+        x = torch.randn(n, c, h, w, device="cuda", dtype=torch.float32)
+        out = torch.empty(n, c, out_h, out_w, device="cuda", dtype=torch.float32)
+        ptx = _compile_kernel(
+            maxpool2d_kernel,
+            (n * c, out_h, out_w),
+            (x, out),
+            {
+                "C": c,
+                "H": h,
+                "W": w,
+                "KH": op["kernel_h"],
+                "KW": op["kernel_w"],
+                "stride": op["stride_h"],
+                "pad": op["pad_h"],
+                "num_warps": 1,
+            },
+        ).replace("maxpool2d_kernel", f"maxpool2d_{index}_kernel")
+        ptx_by_key[f"maxpool2d_{index}"] = ptx
+
     output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_text(
         _generate_cpp(
@@ -420,6 +679,8 @@ def generate_native_runner(args: argparse.Namespace, output_path: pathlib.Path) 
             linears,
             convs,
             relus,
+            batch_norms,
+            max_pools,
             weighted,
             shapes,
             ptx_by_key,
@@ -427,7 +688,19 @@ def generate_native_runner(args: argparse.Namespace, output_path: pathlib.Path) 
     )
 
 
-def _generate_cpp(args, traced, program, linears, convs, relus, weighted, shapes, ptx_by_key):
+def _generate_cpp(
+    args,
+    traced,
+    program,
+    linears,
+    convs,
+    relus,
+    batch_norms,
+    max_pools,
+    weighted,
+    shapes,
+    ptx_by_key,
+):
     placeholder = next(node for node in traced.graph.nodes if node.op == "placeholder")
     output_node = next(node for node in traced.graph.nodes if node.op == "output")
     final_node = output_node.args[0]
@@ -444,19 +717,34 @@ def _generate_cpp(args, traced, program, linears, convs, relus, weighted, shapes
     for index, _ in enumerate(relus):
         function_loads.append(f"""  CUfunction relu{index}_fn = load_function(
       R"CUPTX({ptx_by_key[f"relu_{index}"]})CUPTX", "relu_{index}_kernel");""")
+    for index, _ in enumerate(batch_norms):
+        function_loads.append(f"""  CUfunction batchnorm{index}_fn = load_function(
+      R"CUPTX({ptx_by_key[f"batchnorm2d_{index}"]})CUPTX", "batchnorm2d_{index}_kernel");""")
+    for index, _ in enumerate(max_pools):
+        function_loads.append(f"""  CUfunction maxpool{index}_fn = load_function(
+      R"CUPTX({ptx_by_key[f"maxpool2d_{index}"]})CUPTX", "maxpool2d_{index}_kernel");""")
     declarations = "\n".join(function_loads)
     check_functions = (
         " || ".join(
             [f"!linear{index}_fn" for index in range(len(linears))]
             + [f"!conv{index}_fn" for index in range(len(convs))]
             + [f"!relu{index}_fn" for index in range(len(relus))]
+            + [f"!batchnorm{index}_fn" for index in range(len(batch_norms))]
+            + [f"!maxpool{index}_fn" for index in range(len(max_pools))]
         )
         or "false"
     )
 
-    path_decls = "\n".join(
-        f"  std::string weight{index}_path;\n  std::string bias{index}_path;"
-        for index in range(len(weighted))
+    path_decls = (
+        "\n".join(
+            f"  std::string weight{index}_path;\n  std::string bias{index}_path;"
+            for index in range(len(weighted))
+        )
+        + "\n"
+        + "\n".join(f"""  std::string bn_weight{index}_path;
+  std::string bn_bias{index}_path;
+  std::string bn_mean{index}_path;
+  std::string bn_var{index}_path;""" for index in range(len(batch_norms)))
     )
 
     weight_arg_branches = []
@@ -465,7 +753,17 @@ def _generate_cpp(args, traced, program, linears, convs, relus, weighted, shapes
       weight{index}_path = argv[++i];
     }} else if (arg == "--bias{index}" && i + 1 < argc) {{
       bias{index}_path = argv[++i];""")
-    arg_parser = "\n".join(weight_arg_branches)
+    bn_arg_branches = []
+    for index, _ in enumerate(batch_norms):
+        bn_arg_branches.append(f"""    }} else if (arg == "--bn-weight{index}" && i + 1 < argc) {{
+      bn_weight{index}_path = argv[++i];
+    }} else if (arg == "--bn-bias{index}" && i + 1 < argc) {{
+      bn_bias{index}_path = argv[++i];
+    }} else if (arg == "--bn-mean{index}" && i + 1 < argc) {{
+      bn_mean{index}_path = argv[++i];
+    }} else if (arg == "--bn-var{index}" && i + 1 < argc) {{
+      bn_var{index}_path = argv[++i];""")
+    arg_parser = "\n".join(weight_arg_branches + bn_arg_branches)
 
     weight_reads = []
     for index, op in enumerate(weighted):
@@ -482,6 +780,20 @@ def _generate_cpp(args, traced, program, linears, convs, relus, weighted, shapes
     return 3;
   }}""")
 
+    bn_reads = []
+    for index, op in enumerate(batch_norms):
+        count = op["channels"]
+        bn_reads.append(f"""  const auto bn_weight{index} = read_floats(bn_weight{index}_path);
+  const auto bn_bias{index} = read_floats(bn_bias{index}_path);
+  const auto bn_mean{index} = read_floats(bn_mean{index}_path);
+  const auto bn_var{index} = read_floats(bn_var{index}_path);
+  if (static_cast<int>(bn_weight{index}.size()) != {count} ||
+      static_cast<int>(bn_bias{index}.size()) != {count} ||
+      static_cast<int>(bn_mean{index}.size()) != {count} ||
+      static_cast<int>(bn_var{index}.size()) != {count}) {{
+    return 3;
+  }}""")
+
     device_weight_allocs = "\n".join(
         f"""  CUdeviceptr d_weight{index} =
       allocate_and_copy(weight{index}.data(),
@@ -490,9 +802,28 @@ def _generate_cpp(args, traced, program, linears, convs, relus, weighted, shapes
       allocate_and_copy(bias{index}.data(), bias{index}.size() * sizeof(float));"""
         for index in range(len(weighted))
     )
+    device_bn_allocs = "\n".join(
+        f"""  CUdeviceptr d_bn_weight{index} =
+      allocate_and_copy(bn_weight{index}.data(),
+                        bn_weight{index}.size() * sizeof(float));
+  CUdeviceptr d_bn_bias{index} =
+      allocate_and_copy(bn_bias{index}.data(),
+                        bn_bias{index}.size() * sizeof(float));
+  CUdeviceptr d_bn_mean{index} =
+      allocate_and_copy(bn_mean{index}.data(),
+                        bn_mean{index}.size() * sizeof(float));
+  CUdeviceptr d_bn_var{index} =
+      allocate_and_copy(bn_var{index}.data(),
+                        bn_var{index}.size() * sizeof(float));"""
+        for index in range(len(batch_norms))
+    )
     alloc_guard_parts = ["!d_input"]
     alloc_guard_parts.extend(f"!d_weight{index}" for index in range(len(weighted)))
     alloc_guard_parts.extend(f"!d_bias{index}" for index in range(len(weighted)))
+    alloc_guard_parts.extend(f"!d_bn_weight{index}" for index in range(len(batch_norms)))
+    alloc_guard_parts.extend(f"!d_bn_bias{index}" for index in range(len(batch_norms)))
+    alloc_guard_parts.extend(f"!d_bn_mean{index}" for index in range(len(batch_norms)))
+    alloc_guard_parts.extend(f"!d_bn_var{index}" for index in range(len(batch_norms)))
     alloc_guard = " ||\n      ".join(alloc_guard_parts)
 
     buffer_allocs = []
@@ -530,6 +861,24 @@ def _generate_cpp(args, traced, program, linears, convs, relus, weighted, shapes
                    d_weight{weight_index}, d_bias{weight_index}, {output_var},
                    {n}, {k}, {out_h}, {out_w})) {{
     return 8;
+  }}""")
+        elif op["kind"] == "batchnorm2d":
+            batch_norm_index = _batch_norm_index(batch_norms, op)
+            count = _numel(op["shape"])
+            launches.append(f"""  if (!launch_batchnorm(batchnorm{batch_norm_index}_fn, {input_var},
+                         d_bn_weight{batch_norm_index}, d_bn_bias{batch_norm_index},
+                         d_bn_mean{batch_norm_index}, d_bn_var{batch_norm_index},
+                         {output_var}, {count})) {{
+    return 10;
+  }}""")
+        elif op["kind"] == "maxpool2d":
+            max_pool_index = _max_pool_index(max_pools, op)
+            n, c, h, w = op["input_shape"]
+            out_h = op["shape"][2]
+            out_w = op["shape"][3]
+            launches.append(f"""  if (!launch_maxpool(maxpool{max_pool_index}_fn, {input_var},
+                       {output_var}, {n * c}, {out_h}, {out_w})) {{
+    return 11;
   }}""")
         else:
             index = _relu_index(relus, op)
@@ -569,6 +918,27 @@ def _generate_cpp(args, traced, program, linears, convs, relus, weighted, shapes
   CUdeviceptr scratch = 0;
   void *params[] = {&x, &w, &b, &out, &scratch};
   return check(cuLaunchKernel(function, static_cast<unsigned int>(n * k),
+                              static_cast<unsigned int>(out_h),
+                              static_cast<unsigned int>(out_w), 32, 1, 1, 0,
+                              nullptr, params, nullptr));
+}""")
+    if batch_norms:
+        launch_helpers.append("""bool launch_batchnorm(CUfunction function, CUdeviceptr x,
+                       CUdeviceptr weight, CUdeviceptr bias, CUdeviceptr mean,
+                       CUdeviceptr var, CUdeviceptr out, int count) {
+  CUdeviceptr scratch = 0;
+  void *params[] = {&x, &weight, &bias, &mean, &var, &out, &scratch};
+  return check(cuLaunchKernel(function, static_cast<unsigned int>(count), 1, 1,
+                              32, 1, 1, 0, nullptr, params, nullptr));
+}""")
+    if max_pools:
+        launch_helpers.append("""bool launch_maxpool(CUfunction function, CUdeviceptr x,
+                    CUdeviceptr out, int batch_channels, int out_h,
+                    int out_w) {
+  CUdeviceptr scratch = 0;
+  void *params[] = {&x, &out, &scratch};
+  return check(cuLaunchKernel(function,
+                              static_cast<unsigned int>(batch_channels),
                               static_cast<unsigned int>(out_h),
                               static_cast<unsigned int>(out_w), 32, 1, 1, 0,
                               nullptr, params, nullptr));
@@ -673,6 +1043,7 @@ int main(int argc, char **argv) {{
   }}
 
 {chr(10).join(weight_reads)}
+{chr(10).join(bn_reads)}
 
 {declarations}
   if ({check_functions}) {{
@@ -681,6 +1052,7 @@ int main(int argc, char **argv) {{
 
   CUdeviceptr d_input = allocate_and_copy(input.data(), input.size() * sizeof(float));
 {device_weight_allocs}
+{device_bn_allocs}
   if ({alloc_guard}) {{
     return 5;
   }}

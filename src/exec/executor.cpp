@@ -1746,7 +1746,8 @@ bool execute_instruction(
       opcode == "lg2.approx.f32" || opcode == "lg2.approx.ftz.f32" ||
       opcode == "rcp.approx.ftz.f32" || opcode == "rcp.rn.f32" ||
       opcode == "cvt.rzi.f32.f32" || opcode == "rsqrt.approx.f32" ||
-      opcode == "rsqrt.approx.ftz.f32") {
+      opcode == "rsqrt.approx.ftz.f32" || opcode == "sqrt.approx.f32" ||
+      opcode == "sqrt.approx.ftz.f32") {
     std::size_t pos = 0;
     auto dst = parse_register(instruction.operand_tokens, pos);
     auto a =
@@ -1780,6 +1781,8 @@ bool execute_instruction(
     } else if (opcode == "rsqrt.approx.f32" ||
                opcode == "rsqrt.approx.ftz.f32") {
       result = 1.0F / std::sqrt(*a);
+    } else if (opcode == "sqrt.approx.f32" || opcode == "sqrt.approx.ftz.f32") {
+      result = std::sqrt(*a);
     } else {
       result = std::exp2(*a);
     }
@@ -1791,7 +1794,8 @@ bool execute_instruction(
   }
 
   if (opcode == "div.rn.f32" || opcode == "div.approx.f32" ||
-      opcode == "sub.f32" || opcode == "sqrt.rn.f32") {
+      opcode == "div.full.f32" || opcode == "sub.f32" ||
+      opcode == "sqrt.rn.f32") {
     std::size_t pos = 0;
     auto dst = parse_register(instruction.operand_tokens, pos);
     auto a =
@@ -1804,7 +1808,8 @@ bool execute_instruction(
       return false;
     }
     float result = 0.0F;
-    if (opcode == "div.rn.f32" || opcode == "div.approx.f32") {
+    if (opcode == "div.rn.f32" || opcode == "div.approx.f32" ||
+        opcode == "div.full.f32") {
       result = *a / *b;
     } else if (opcode == "sub.f32") {
       result = *a - *b;

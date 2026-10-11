@@ -1,0 +1,21 @@
+.version 8.0
+.target sm_80
+.address_size 64
+
+.visible .entry scalar_math_kernel(
+	.param .u64 scalar_math_kernel_param_0,
+	.param .u64 scalar_math_kernel_param_1
+)
+{
+	.reg .f32 	%f<4>;
+	.reg .b32 	%r<2>;
+	.reg .b64 	%rd<3>;
+
+	ld.param.u64 	%rd1, [scalar_math_kernel_param_0];
+	ld.param.u64 	%rd2, [scalar_math_kernel_param_1];
+	ld.global.f32 	%f1, [%rd1];
+	div.full.f32 	%f2, %f1, 0f40000000;
+	sqrt.approx.ftz.f32 	%f3, %f2;
+	st.global.f32 	[%rd2], %f3;
+	ret;
+}

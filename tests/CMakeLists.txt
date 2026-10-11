@@ -469,6 +469,19 @@ cudasim_apply_sanitizers(multi_warp_barrier_exec_smoke)
 add_dependencies(multi_warp_barrier_exec_smoke generate_multi_warp_ptx)
 add_test(NAME ptx.multi_warp_barrier_exec_smoke COMMAND multi_warp_barrier_exec_smoke)
 
+add_executable(scalar_math_exec_smoke
+  ptx/scalar_math_exec_smoke.cpp
+)
+target_compile_features(scalar_math_exec_smoke PRIVATE cxx_std_20)
+target_include_directories(scalar_math_exec_smoke PRIVATE ${CMAKE_SOURCE_DIR}/src)
+target_link_libraries(scalar_math_exec_smoke PRIVATE cuda_shim)
+target_compile_definitions(scalar_math_exec_smoke PRIVATE
+  PTX_FIXTURE_PATH="${CMAKE_CURRENT_SOURCE_DIR}/ptx/scalar_math_kernel.ptx"
+)
+cudasim_set_warnings(scalar_math_exec_smoke)
+cudasim_apply_sanitizers(scalar_math_exec_smoke)
+add_test(NAME ptx.scalar_math_exec_smoke COMMAND scalar_math_exec_smoke)
+
 add_test(
   NAME ptx.simt_gate
   COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/generated/check_simt.py
@@ -803,6 +816,74 @@ add_test(
           --cuda $<TARGET_FILE:cuda_shim>
           --core-dir $<TARGET_FILE_DIR:cudasim_core>
           --output-dir ${CMAKE_CURRENT_BINARY_DIR}/models/conv_module
+)
+
+set(RESNET_STEM_RUNNER_SRC ${GENERATED_MODEL_DIR}/resnet_stem_runner.cu)
+set(RESNET_STEM_MODEL_FIXTURE
+  ${CMAKE_CURRENT_SOURCE_DIR}/models/fixtures/resnet_stem.py)
+
+add_custom_command(
+  OUTPUT ${RESNET_STEM_RUNNER_SRC}
+  COMMAND ${SIM_PYTHON} ${CMAKE_CURRENT_SOURCE_DIR}/models/generate_model_runner.py
+          --spec module
+          --output-cpp ${RESNET_STEM_RUNNER_SRC}
+          --module-file ${RESNET_STEM_MODEL_FIXTURE}
+          --batch 1
+          --in-channels 3
+          --out-channels 4
+          --height 8
+          --width 8
+          --block 32
+  DEPENDS
+    ${CMAKE_CURRENT_SOURCE_DIR}/models/generate_model_runner.py
+    ${CMAKE_CURRENT_SOURCE_DIR}/models/specs/module.py
+    ${RESNET_STEM_MODEL_FIXTURE}
+  VERBATIM
+)
+
+add_executable(resnet_stem_model_runner ${RESNET_STEM_RUNNER_SRC})
+set_target_properties(resnet_stem_model_runner PROPERTIES
+  CUDA_STANDARD 20
+  CUDA_STANDARD_REQUIRED ON
+  CUDA_ARCHITECTURES 86
+)
+target_link_libraries(resnet_stem_model_runner PRIVATE CUDA::cuda_driver)
+
+add_test(
+  NAME models.resnet_stem.runner_cpu
+  COMMAND ${SIM_PYTHON} ${CMAKE_CURRENT_SOURCE_DIR}/models/model_runner.py
+          --spec module
+          --mode cpu
+          --module-file ${RESNET_STEM_MODEL_FIXTURE}
+          --batch 1
+          --in-channels 3
+          --out-channels 4
+          --height 8
+          --width 8
+          --runner $<TARGET_FILE:resnet_stem_model_runner>
+          --cudart $<TARGET_FILE:cudart_shim>
+          --cuda $<TARGET_FILE:cuda_shim>
+          --core-dir $<TARGET_FILE_DIR:cudasim_core>
+          --output-dir ${CMAKE_CURRENT_BINARY_DIR}/models/resnet_stem
+)
+add_test(
+  NAME models.resnet_stem.runner_sim
+  COMMAND ${SIM_PYTHON} ${CMAKE_CURRENT_SOURCE_DIR}/models/model_runner.py
+          --spec module
+          --mode gpu
+          --simulate
+          --compare
+          --module-file ${RESNET_STEM_MODEL_FIXTURE}
+          --batch 1
+          --in-channels 3
+          --out-channels 4
+          --height 8
+          --width 8
+          --runner $<TARGET_FILE:resnet_stem_model_runner>
+          --cudart $<TARGET_FILE:cudart_shim>
+          --cuda $<TARGET_FILE:cuda_shim>
+          --core-dir $<TARGET_FILE_DIR:cudasim_core>
+          --output-dir ${CMAKE_CURRENT_BINARY_DIR}/models/resnet_stem
 )
 
 add_executable(runtime_api_smoke
