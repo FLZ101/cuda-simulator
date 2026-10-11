@@ -133,6 +133,95 @@ bool launch_2d(CUfunction function, const std::vector<void *> &params, int gx,
              const_cast<void **>(params.data()), nullptr) == CUDA_SUCCESS;
 }
 
+std::vector<float> read_optional_floats(const std::string &path) {
+  if (path == "-") {
+    return {};
+  }
+  return read_floats(path);
+}
+
+std::vector<int> read_optional_ints(const std::string &path) {
+  if (path == "-") {
+    return {};
+  }
+  return read_ints(path);
+}
+
+CUdeviceptr alloc_copy_optional(const void *data, std::size_t bytes) {
+  if (data == nullptr || bytes == 0) {
+    return 0;
+  }
+  return alloc_copy(data, bytes);
+}
+
+std::string generic_kernel_name(const std::string &mode) {
+  if (mode == "std" || mode == "select" || mode == "erf" ||
+      mode == "erfinv" || mode == "sinc" ||
+      mode == "lgamma" || mode == "digamma" || mode == "fmod" ||
+      mode == "remainder" || mode == "nextafter" || mode == "isfinite" ||
+      mode == "isinf" || mode == "isnan") {
+    return mode + "_kernel";
+  }
+  return mode;
+}
+
+int run_generic_mode(const std::string &mode, int argc, char **argv) {
+  if (argc != 20) {
+    return 201;
+  }
+  auto a = read_optional_floats(argv[2]);
+  auto b = read_optional_floats(argv[3]);
+  auto c = read_optional_floats(argv[4]);
+  auto d = read_optional_floats(argv[5]);
+  auto idx = read_optional_ints(argv[6]);
+  int p0 = std::stoi(argv[7]);
+  int p1 = std::stoi(argv[8]);
+  int p2 = std::stoi(argv[9]);
+  int p3 = std::stoi(argv[10]);
+  int p4 = std::stoi(argv[11]);
+  int p5 = std::stoi(argv[12]);
+  int p6 = std::stoi(argv[13]);
+  int p7 = std::stoi(argv[14]);
+  float f0 = std::stof(argv[15]);
+  float f1 = std::stof(argv[16]);
+  float f2 = std::stof(argv[17]);
+  float f3 = std::stof(argv[18]);
+  const std::string out_path = argv[19];
+  if (p0 <= 0) {
+    return 202;
+  }
+
+  const std::size_t out_bytes = static_cast<std::size_t>(p0) * sizeof(float);
+  CUdeviceptr d_a =
+      alloc_copy_optional(a.data(), a.size() * sizeof(float));
+  CUdeviceptr d_b =
+      alloc_copy_optional(b.data(), b.size() * sizeof(float));
+  CUdeviceptr d_c =
+      alloc_copy_optional(c.data(), c.size() * sizeof(float));
+  CUdeviceptr d_d =
+      alloc_copy_optional(d.data(), d.size() * sizeof(float));
+  CUdeviceptr d_idx = alloc_copy_optional(idx.data(), idx.size() * sizeof(int));
+  CUdeviceptr d_out = 0;
+  if (cuMemAlloc(&d_out, out_bytes) != CUDA_SUCCESS) {
+    return 203;
+  }
+
+  std::vector<void *> params = {&d_a,   &d_b,   &d_c,   &d_d,   &d_idx,
+                                &d_out, &p0,    &p1,    &p2,    &p3,
+                                &p4,    &p5,    &p6,    &p7,    &f0,
+                                &f1,    &f2,    &f3};
+  std::string ptx_path = std::string(GENERATED_PTX_DIR) + "/" + mode + ".ptx";
+  CUfunction function = load_function(ptx_path, generic_kernel_name(mode));
+  if (!function || !launch_1d(function, params, 1, 1)) {
+    return 204;
+  }
+
+  std::vector<float> output(static_cast<std::size_t>(p0));
+  cuMemcpyDtoH(output.data(), d_out, out_bytes);
+  write_floats(out_path, output);
+  return 0;
+}
+
 } // namespace
 
 int main(int argc, char **argv) {
@@ -1048,6 +1137,178 @@ int main(int argc, char **argv) {
     return 0;
   }
 
+  if (mode == "tanhshrink" || mode == "selu" || mode == "gelu_tanh" ||
+      mode == "sign" || mode == "isfinite" || mode == "isinf" ||
+      mode == "isnan") {
+    if (argc != 5) {
+      return 119;
+    }
+    auto input = read_floats(argv[2]);
+    const int n = std::stoi(argv[3]);
+    const std::size_t bytes = input.size() * sizeof(float);
+    CUdeviceptr d_in = alloc_copy(input.data(), bytes);
+    CUdeviceptr d_out = 0;
+    cuMemAlloc(&d_out, bytes);
+    int count = n;
+    std::vector<void *> params = {&d_in, &d_out, &count};
+    std::string ptx;
+    std::string name;
+    if (mode == "tanhshrink") {
+      ptx = TANHSHRINK_PTX_PATH;
+      name = "tanhshrink";
+    } else if (mode == "selu") {
+      ptx = SELU_PTX_PATH;
+      name = "selu";
+    } else if (mode == "gelu_tanh") {
+      ptx = GELU_TANH_PTX_PATH;
+      name = "gelu_tanh";
+    } else if (mode == "sign") {
+      ptx = SIGN_PTX_PATH;
+      name = "sign";
+    } else if (mode == "isfinite") {
+      ptx = ISFINITE_PTX_PATH;
+      name = "isfinite_kernel";
+    } else if (mode == "isinf") {
+      ptx = ISINF_PTX_PATH;
+      name = "isinf_kernel";
+    } else {
+      ptx = ISNAN_PTX_PATH;
+      name = "isnan_kernel";
+    }
+    CUfunction f = load_function(ptx, name);
+    if (!f || !launch_1d(f, params, n)) {
+      return 120;
+    }
+    std::vector<float> output(input.size());
+    cuMemcpyDtoH(output.data(), d_out, bytes);
+    write_floats(out_path, output);
+    return 0;
+  }
+
+  if (mode == "hardshrink" || mode == "softshrink" || mode == "prelu" ||
+      mode == "celu") {
+    if (argc != 6) {
+      return 121;
+    }
+    auto input = read_floats(argv[2]);
+    const int n = std::stoi(argv[3]);
+    const float value = std::stof(argv[4]);
+    const std::size_t bytes = input.size() * sizeof(float);
+    CUdeviceptr d_in = alloc_copy(input.data(), bytes);
+    CUdeviceptr d_out = 0;
+    cuMemAlloc(&d_out, bytes);
+    int count = n;
+    float v = value;
+    std::vector<void *> params = {&d_in, &d_out, &count, &v};
+    std::string ptx;
+    std::string name;
+    if (mode == "hardshrink") {
+      ptx = HARDSHRINK_PTX_PATH;
+      name = "hardshrink";
+    } else if (mode == "softshrink") {
+      ptx = SOFTSHRINK_PTX_PATH;
+      name = "softshrink";
+    } else if (mode == "prelu") {
+      ptx = PRELU_PTX_PATH;
+      name = "prelu";
+    } else {
+      ptx = CELU_PTX_PATH;
+      name = "celu";
+    }
+    CUfunction f = load_function(ptx, name);
+    if (!f || !launch_1d(f, params, n)) {
+      return 122;
+    }
+    std::vector<float> output(input.size());
+    cuMemcpyDtoH(output.data(), d_out, bytes);
+    write_floats(out_path, output);
+    return 0;
+  }
+
+  if (mode == "hardtanh" || mode == "threshold" || mode == "heaviside") {
+    if (argc != 7) {
+      return 123;
+    }
+    auto input = read_floats(argv[2]);
+    const int n = std::stoi(argv[3]);
+    const float first = std::stof(argv[4]);
+    const float second = std::stof(argv[5]);
+    const std::size_t bytes = input.size() * sizeof(float);
+    CUdeviceptr d_in = alloc_copy(input.data(), bytes);
+    CUdeviceptr d_out = 0;
+    cuMemAlloc(&d_out, bytes);
+    int count = n;
+    float a = first;
+    float b = second;
+    std::vector<void *> params = {&d_in, &d_out, &count, &a, &b};
+    std::string ptx;
+    std::string name;
+    if (mode == "hardtanh") {
+      ptx = HARDTANH_PTX_PATH;
+      name = "hardtanh";
+    } else if (mode == "threshold") {
+      ptx = THRESHOLD_PTX_PATH;
+      name = "threshold";
+    } else {
+      ptx = HEAVISIDE_PTX_PATH;
+      name = "heaviside";
+    }
+    CUfunction f = load_function(ptx, name);
+    if (!f || !launch_1d(f, params, n)) {
+      return 124;
+    }
+    std::vector<float> output(input.size());
+    cuMemcpyDtoH(output.data(), d_out, bytes);
+    write_floats(out_path, output);
+    return 0;
+  }
+
+  if (mode == "glu" || mode == "geglu" || mode == "reglu" || mode == "fmod" ||
+      mode == "remainder" || mode == "nextafter") {
+    if (argc != 6) {
+      return 125;
+    }
+    auto a = read_floats(argv[2]);
+    auto b = read_floats(argv[3]);
+    const int n = std::stoi(argv[4]);
+    const std::size_t bytes = a.size() * sizeof(float);
+    CUdeviceptr d_a = alloc_copy(a.data(), bytes);
+    CUdeviceptr d_b = alloc_copy(b.data(), b.size() * sizeof(float));
+    CUdeviceptr d_out = 0;
+    cuMemAlloc(&d_out, bytes);
+    int count = n;
+    std::vector<void *> params = {&d_a, &d_b, &d_out, &count};
+    std::string ptx;
+    std::string name;
+    if (mode == "glu") {
+      ptx = GLU_PTX_PATH;
+      name = "glu";
+    } else if (mode == "geglu") {
+      ptx = GEGLU_PTX_PATH;
+      name = "geglu";
+    } else if (mode == "reglu") {
+      ptx = REGLU_PTX_PATH;
+      name = "reglu";
+    } else if (mode == "fmod") {
+      ptx = FMOD_PTX_PATH;
+      name = "fmod_kernel";
+    } else if (mode == "remainder") {
+      ptx = REMAINDER_PTX_PATH;
+      name = "remainder_kernel";
+    } else {
+      ptx = NEXTAFTER_PTX_PATH;
+      name = "nextafter_kernel";
+    }
+    CUfunction f = load_function(ptx, name);
+    if (!f || !launch_1d(f, params, n)) {
+      return 126;
+    }
+    std::vector<float> output(a.size());
+    cuMemcpyDtoH(output.data(), d_out, bytes);
+    write_floats(out_path, output);
+    return 0;
+  }
+
   if (mode == "pow") {
     if (argc != 6) {
       return 61;
@@ -1920,5 +2181,5 @@ int main(int argc, char **argv) {
     return 0;
   }
 
-  return 24;
+  return run_generic_mode(mode, argc, argv);
 }

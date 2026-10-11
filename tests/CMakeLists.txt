@@ -30,105 +30,257 @@ set(GENERATED_TRANSPOSE_PTX ${GENERATED_PTX_DIR}/transpose.ptx)
 set(GENERATED_RELU_PTX ${GENERATED_PTX_DIR}/relu.ptx)
 set(GENERATED_SOFTMAX_PTX ${GENERATED_PTX_DIR}/softmax_row.ptx)
 
-set(CLASSIC_KERNEL_NAMES
-  matmul_naive
-  matmul_tiled
-  reduce_sum
-  transpose
+set(KERNEL_GROUPS
+  elementwise
+  convolution
+  normalization
+  reduction
+  attention
+  indexing
+  loss
+  matrix
+  misc
+)
+
+set(KERNELS_elementwise
+  abs
+  acos
+  asin
+  atan
+  atan2
+  cbrt
+  ceil
+  clamp
+  copy
+  copysign
+  cosh
+  divide
+  elementwise_add
+  elementwise_mul
+  elu
+  erfc
+  exp
+  exp2
+  expm1
+  floor
+  gelu
+  hard_sigmoid
+  hardswish
+  hypot
+  leaky_relu
+  lerp
+  log
+  log2
+  log_sigmoid
+  maximum
+  minimum
+  mish
+  neg
+  pow
+  reciprocal
   relu
-  softmax_row
+  relu6
+  residual_add
+  rint
+  rsqrt
+  saxpy
+  scale
+  sigmoid
+  silu
+  sinh
+  softplus
+  softsign
+  sqrt
+  square
+  subtract
+  swiglu
+  tanh
+  trunc
+  hardtanh
+  hardshrink
+  softshrink
+  tanhshrink
+  threshold
+  prelu
+  celu
+  selu
+  gelu_tanh
+  glu
+  geglu
+  reglu
+  sign
+  heaviside
+  fmod
+  remainder
+  nextafter
+  isfinite
+  isinf
+  isnan
+)
+
+set(KERNELS_convolution
+  avg_pool2d
+  max_pool2d
   conv2d_naive
   conv2d_im2col
   conv2d_shared
-  bias_add
-  batch_norm
-  max_pool2d
-  avg_pool2d
-  layer_norm
-  attention_scores
-  embedding_lookup
-  gelu
-  elementwise_add
-  elementwise_mul
-  scale
-  mean
-  dropout
-  causal_mask
-  residual_add
-  rms_norm
-  concat
-  split
-  argmax
-  clamp
-  neg
-  square
-  log_softmax
-  cross_entropy
-  sigmoid
-  tanh
-  silu
-  reciprocal
-  exp
-  log
-  sqrt
-  pow
-  rsqrt
-  minimum
-  maximum
-  leaky_relu
-  abs
-  relu6
-  softplus
-  swiglu
-  elu
-  exp2
-  log2
-  floor
-  ceil
-  rint
-  trunc
-  acos
-  erfc
-  hard_sigmoid
-  hardswish
-  softsign
-  log_sigmoid
-  subtract
-  divide
-  copysign
-  lerp
-  cosh
-  sinh
-  asin
-  atan
-  cbrt
-  mish
-  expm1
-  atan2
-  hypot
-  masked_fill
-  alibi_bias
-  global_avg_pool
-  instance_norm
-  pad2d
-  upsample_nearest2d
   depthwise_conv2d
-  repeat_kv
-  channel_shuffle
-  pixel_shuffle
+  conv_transpose2d
   adaptive_avg_pool2d
+  adaptive_max_pool2d
+  global_avg_pool
+  pad2d
+  reflection_pad2d
+  upsample_nearest2d
+  upsample_bilinear2d
+  pixel_shuffle
+  pixel_unshuffle
+  channel_shuffle
+)
+
+set(KERNELS_normalization
+  batch_norm
+  instance_norm
+  layer_norm
+  group_norm
+  rms_norm
   local_response_norm
   fused_add_norm
+)
+
+set(KERNELS_reduction
+  reduce_sum
+  mean
+  argmax
   cumsum
-  group_norm
-  conv_transpose2d
-  pixel_unshuffle
-  reflection_pad2d
-  upsample_bilinear2d
-  adaptive_max_pool2d
+  reduce_prod
+  reduce_min
+  reduce_max
+  argmin
+  amax
+  amin
+  logsumexp
+  norm
+  std
+  var
+  cumprod
+  cummax
+  cummin
+  count_nonzero
+  all
+  any
+)
+
+set(KERNELS_attention
+  attention_scores
+  softmax_row
+  log_softmax
+  causal_mask
+  dropout
+  masked_fill
+  alibi_bias
+  repeat_kv
   rotary_embedding
+  embedding_lookup
+  masked_softmax
+  scaled_dot_product_attention
+  grouped_query_attention
+  multi_query_attention
+  multi_head_attention_forward
+  flash_attention_simt
+  sliding_window_attention
+  block_sparse_attention
+  relative_position_bias
+  sinusoidal_position_embedding
+  xpos_embedding
+  ntk_rope_scaling
+  yarn_rope_scaling
+  kv_cache_append
+  kv_cache_rotate
+  kv_cache_update
+  paged_kv_cache_read
+  paged_kv_cache_write
+  fused_mlp
+  gated_mlp
+  fused_rms_norm_linear
+  fused_layer_norm_linear
+)
+
+set(KERNELS_indexing
+  concat
+  split
   gather
   scatter_add
+  where
+  select
+  one_hot
+  index_select
+  index_copy
+  index_fill
+  masked_select
+  take
+  gather_nd
+  scatter
+  scatter_reduce
+  batch_gather
+  argsort
+  sort
+  topk
+  unique
+  nonzero
+  stack
+  tile
+  repeat
+  repeat_interleave
+  expand
+  narrow
+  slice
+  roll
+  flip
+  rot90
+)
+
+set(KERNELS_loss
+  cross_entropy
+  nll_loss
+  mse_loss
+  l1_loss
+  smooth_l1_loss
+  huber_loss
+  binary_cross_entropy
+  binary_cross_entropy_with_logits
+  kl_div
+  poisson_nll_loss
+  hinge_embedding_loss
+  cosine_embedding_loss
+  margin_ranking_loss
+  triplet_margin_loss
+  soft_margin_loss
+  focal_loss
+  cosine_similarity
+)
+
+set(KERNELS_matrix
+  matmul_naive
+  matmul_tiled
+  transpose
+  bias_add
+  batch_matmul
+  addmm
+  outer_product
+  dot_product
+  einsum
+)
+
+set(KERNELS_misc
+  erf
+  erfinv
+  sinc
+  lgamma
+  digamma
+  softmin
+  softmax1d
+  spatial_softmax
 )
 
 add_custom_command(
@@ -164,50 +316,29 @@ add_custom_command(
 )
 add_custom_target(generate_multi_warp_ptx DEPENDS ${GENERATED_MULTI_WARP_PTX})
 
-add_custom_command(
-  OUTPUT ${GENERATED_SAXPY_PTX}
-  COMMAND ${CMAKE_COMMAND} -E make_directory ${GENERATED_PTX_DIR}
-  COMMAND ${CUDAToolkit_NVCC_EXECUTABLE} -ptx -arch=compute_80
-          ${CMAKE_CURRENT_SOURCE_DIR}/kernels/saxpy.cu
-          -o ${GENERATED_SAXPY_PTX}
-  DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/kernels/saxpy.cu
-  VERBATIM
-)
-add_custom_target(generate_saxpy_ptx DEPENDS ${GENERATED_SAXPY_PTX})
-
-add_custom_command(
-  OUTPUT ${GENERATED_COPY_PTX}
-  COMMAND ${CMAKE_COMMAND} -E make_directory ${GENERATED_PTX_DIR}
-  COMMAND ${CUDAToolkit_NVCC_EXECUTABLE} -ptx -arch=compute_80
-          ${CMAKE_CURRENT_SOURCE_DIR}/kernels/copy.cu
-          -o ${GENERATED_COPY_PTX}
-  DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/kernels/copy.cu
-  VERBATIM
-)
-add_custom_target(generate_copy_ptx DEPENDS ${GENERATED_COPY_PTX})
-
-foreach(kernel IN LISTS CLASSIC_KERNEL_NAMES)
-  add_custom_command(
-    OUTPUT ${GENERATED_PTX_DIR}/${kernel}.ptx
-    COMMAND ${CMAKE_COMMAND} -E make_directory ${GENERATED_PTX_DIR}
-    COMMAND ${CUDAToolkit_NVCC_EXECUTABLE} -ptx -arch=compute_80
-            ${CMAKE_CURRENT_SOURCE_DIR}/kernels/${kernel}.cu
-            -o ${GENERATED_PTX_DIR}/${kernel}.ptx
-    DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/kernels/${kernel}.cu
-    VERBATIM
-  )
-  add_custom_target(generate_${kernel}_ptx ALL
-    DEPENDS ${GENERATED_PTX_DIR}/${kernel}.ptx
-  )
-  list(APPEND CLASSIC_KERNEL_PTX ${GENERATED_PTX_DIR}/${kernel}.ptx)
+foreach(group IN LISTS KERNEL_GROUPS)
+  foreach(kernel IN LISTS KERNELS_${group})
+    set(KERNEL_SOURCE ${CMAKE_CURRENT_SOURCE_DIR}/kernels/${group}/${kernel}.cu)
+    add_custom_command(
+      OUTPUT ${GENERATED_PTX_DIR}/${kernel}.ptx
+      COMMAND ${CMAKE_COMMAND} -E make_directory ${GENERATED_PTX_DIR}
+      COMMAND ${CUDAToolkit_NVCC_EXECUTABLE} -ptx -arch=compute_80
+              ${KERNEL_SOURCE}
+              -o ${GENERATED_PTX_DIR}/${kernel}.ptx
+      DEPENDS ${KERNEL_SOURCE}
+      VERBATIM
+    )
+    add_custom_target(generate_${kernel}_ptx ALL
+      DEPENDS ${GENERATED_PTX_DIR}/${kernel}.ptx
+    )
+    list(APPEND CLASSIC_KERNEL_PTX ${GENERATED_PTX_DIR}/${kernel}.ptx)
+  endforeach()
 endforeach()
 
 set(ALL_GENERATED_PTX
   ${GENERATED_VECTOR_ADD_PTX}
   ${GENERATED_SHARED_PTX}
   ${GENERATED_MULTI_WARP_PTX}
-  ${GENERATED_SAXPY_PTX}
-  ${GENERATED_COPY_PTX}
   ${CLASSIC_KERNEL_PTX}
 )
 
@@ -303,218 +434,44 @@ set_target_properties(gpu_reference_runner PROPERTIES
 )
 target_include_directories(gpu_reference_runner PRIVATE ${CMAKE_SOURCE_DIR}/src)
 target_link_libraries(gpu_reference_runner PRIVATE CUDA::cuda_driver)
+foreach(group IN LISTS KERNEL_GROUPS)
+  foreach(kernel IN LISTS KERNELS_${group})
+    string(TOUPPER ${kernel} KERNEL_MACRO)
+    target_compile_definitions(gpu_reference_runner PRIVATE
+      ${KERNEL_MACRO}_PTX_PATH="${GENERATED_PTX_DIR}/${kernel}.ptx"
+    )
+  endforeach()
+endforeach()
+
 target_compile_definitions(gpu_reference_runner PRIVATE
-  BIAS_ADD_PTX_PATH="${GENERATED_PTX_DIR}/bias_add.ptx"
-  BATCH_NORM_PTX_PATH="${GENERATED_PTX_DIR}/batch_norm.ptx"
+  GENERATED_PTX_DIR="${GENERATED_PTX_DIR}"
   MAX_POOL_PTX_PATH="${GENERATED_PTX_DIR}/max_pool2d.ptx"
   AVG_POOL_PTX_PATH="${GENERATED_PTX_DIR}/avg_pool2d.ptx"
-  LAYER_NORM_PTX_PATH="${GENERATED_PTX_DIR}/layer_norm.ptx"
   EMBEDDING_PTX_PATH="${GENERATED_PTX_DIR}/embedding_lookup.ptx"
-  TRANSPOSE_PTX_PATH="${GENERATED_PTX_DIR}/transpose.ptx"
-  MATMUL_NAIVE_PTX_PATH="${GENERATED_PTX_DIR}/matmul_naive.ptx"
-  MATMUL_TILED_PTX_PATH="${GENERATED_PTX_DIR}/matmul_tiled.ptx"
-  SOFTMAX_PTX_PATH="${GENERATED_PTX_DIR}/softmax_row.ptx"
-  REDUCE_SUM_PTX_PATH="${GENERATED_PTX_DIR}/reduce_sum.ptx"
-  CONV2D_NAIVE_PTX_PATH="${GENERATED_PTX_DIR}/conv2d_naive.ptx"
-  CONV2D_IM2COL_PTX_PATH="${GENERATED_PTX_DIR}/conv2d_im2col.ptx"
-  CONV2D_SHARED_PTX_PATH="${GENERATED_PTX_DIR}/conv2d_shared.ptx"
   ATTENTION_PTX_PATH="${GENERATED_PTX_DIR}/attention_scores.ptx"
-  GELU_PTX_PATH="${GENERATED_PTX_DIR}/gelu.ptx"
-  COPY_PTX_PATH="${GENERATED_COPY_PTX}"
-  SAXPY_PTX_PATH="${GENERATED_SAXPY_PTX}"
-  RELU_PTX_PATH="${GENERATED_RELU_PTX}"
-  ELEMENTWISE_ADD_PTX_PATH="${GENERATED_PTX_DIR}/elementwise_add.ptx"
-  ELEMENTWISE_MUL_PTX_PATH="${GENERATED_PTX_DIR}/elementwise_mul.ptx"
-  SCALE_PTX_PATH="${GENERATED_PTX_DIR}/scale.ptx"
-  MEAN_PTX_PATH="${GENERATED_PTX_DIR}/mean.ptx"
-  DROPOUT_PTX_PATH="${GENERATED_PTX_DIR}/dropout.ptx"
-  CAUSAL_MASK_PTX_PATH="${GENERATED_PTX_DIR}/causal_mask.ptx"
-  RESIDUAL_ADD_PTX_PATH="${GENERATED_PTX_DIR}/residual_add.ptx"
-  RMS_NORM_PTX_PATH="${GENERATED_PTX_DIR}/rms_norm.ptx"
-  CONCAT_PTX_PATH="${GENERATED_PTX_DIR}/concat.ptx"
-  SPLIT_PTX_PATH="${GENERATED_PTX_DIR}/split.ptx"
-  ARGMAX_PTX_PATH="${GENERATED_PTX_DIR}/argmax.ptx"
-  CLAMP_PTX_PATH="${GENERATED_PTX_DIR}/clamp.ptx"
-  NEG_PTX_PATH="${GENERATED_PTX_DIR}/neg.ptx"
-  SQUARE_PTX_PATH="${GENERATED_PTX_DIR}/square.ptx"
-  LOG_SOFTMAX_PTX_PATH="${GENERATED_PTX_DIR}/log_softmax.ptx"
-  CROSS_ENTROPY_PTX_PATH="${GENERATED_PTX_DIR}/cross_entropy.ptx"
-  SIGMOID_PTX_PATH="${GENERATED_PTX_DIR}/sigmoid.ptx"
-  TANH_PTX_PATH="${GENERATED_PTX_DIR}/tanh.ptx"
-  SILU_PTX_PATH="${GENERATED_PTX_DIR}/silu.ptx"
-  RECIPROCAL_PTX_PATH="${GENERATED_PTX_DIR}/reciprocal.ptx"
-  EXP_PTX_PATH="${GENERATED_PTX_DIR}/exp.ptx"
-  LOG_PTX_PATH="${GENERATED_PTX_DIR}/log.ptx"
-  SQRT_PTX_PATH="${GENERATED_PTX_DIR}/sqrt.ptx"
-  POW_PTX_PATH="${GENERATED_PTX_DIR}/pow.ptx"
-  RSQRT_PTX_PATH="${GENERATED_PTX_DIR}/rsqrt.ptx"
-  MINIMUM_PTX_PATH="${GENERATED_PTX_DIR}/minimum.ptx"
-  MAXIMUM_PTX_PATH="${GENERATED_PTX_DIR}/maximum.ptx"
-  LEAKY_RELU_PTX_PATH="${GENERATED_PTX_DIR}/leaky_relu.ptx"
-  ABS_PTX_PATH="${GENERATED_PTX_DIR}/abs.ptx"
-  RELU6_PTX_PATH="${GENERATED_PTX_DIR}/relu6.ptx"
-  SOFTPLUS_PTX_PATH="${GENERATED_PTX_DIR}/softplus.ptx"
-  SWIGLU_PTX_PATH="${GENERATED_PTX_DIR}/swiglu.ptx"
-  ELU_PTX_PATH="${GENERATED_PTX_DIR}/elu.ptx"
-  EXP2_PTX_PATH="${GENERATED_PTX_DIR}/exp2.ptx"
-  LOG2_PTX_PATH="${GENERATED_PTX_DIR}/log2.ptx"
-  FLOOR_PTX_PATH="${GENERATED_PTX_DIR}/floor.ptx"
-  CEIL_PTX_PATH="${GENERATED_PTX_DIR}/ceil.ptx"
-  RINT_PTX_PATH="${GENERATED_PTX_DIR}/rint.ptx"
-  TRUNC_PTX_PATH="${GENERATED_PTX_DIR}/trunc.ptx"
-  ACOS_PTX_PATH="${GENERATED_PTX_DIR}/acos.ptx"
-  ERFC_PTX_PATH="${GENERATED_PTX_DIR}/erfc.ptx"
-  HARD_SIGMOID_PTX_PATH="${GENERATED_PTX_DIR}/hard_sigmoid.ptx"
-  HARDSWISH_PTX_PATH="${GENERATED_PTX_DIR}/hardswish.ptx"
-  SOFTSIGN_PTX_PATH="${GENERATED_PTX_DIR}/softsign.ptx"
-  LOG_SIGMOID_PTX_PATH="${GENERATED_PTX_DIR}/log_sigmoid.ptx"
-  SUBTRACT_PTX_PATH="${GENERATED_PTX_DIR}/subtract.ptx"
-  DIVIDE_PTX_PATH="${GENERATED_PTX_DIR}/divide.ptx"
-  COPYSIGN_PTX_PATH="${GENERATED_PTX_DIR}/copysign.ptx"
-  LERP_PTX_PATH="${GENERATED_PTX_DIR}/lerp.ptx"
-  COSH_PTX_PATH="${GENERATED_PTX_DIR}/cosh.ptx"
-  SINH_PTX_PATH="${GENERATED_PTX_DIR}/sinh.ptx"
-  ASIN_PTX_PATH="${GENERATED_PTX_DIR}/asin.ptx"
-  ATAN_PTX_PATH="${GENERATED_PTX_DIR}/atan.ptx"
-  CBRT_PTX_PATH="${GENERATED_PTX_DIR}/cbrt.ptx"
-  MISH_PTX_PATH="${GENERATED_PTX_DIR}/mish.ptx"
-  EXPM1_PTX_PATH="${GENERATED_PTX_DIR}/expm1.ptx"
-  ATAN2_PTX_PATH="${GENERATED_PTX_DIR}/atan2.ptx"
-  HYPOT_PTX_PATH="${GENERATED_PTX_DIR}/hypot.ptx"
-  MASKED_FILL_PTX_PATH="${GENERATED_PTX_DIR}/masked_fill.ptx"
-  ALIBI_BIAS_PTX_PATH="${GENERATED_PTX_DIR}/alibi_bias.ptx"
-  GLOBAL_AVG_POOL_PTX_PATH="${GENERATED_PTX_DIR}/global_avg_pool.ptx"
-  INSTANCE_NORM_PTX_PATH="${GENERATED_PTX_DIR}/instance_norm.ptx"
-  PAD2D_PTX_PATH="${GENERATED_PTX_DIR}/pad2d.ptx"
-  UPSAMPLE_NEAREST2D_PTX_PATH="${GENERATED_PTX_DIR}/upsample_nearest2d.ptx"
-  DEPTHWISE_CONV2D_PTX_PATH="${GENERATED_PTX_DIR}/depthwise_conv2d.ptx"
-  REPEAT_KV_PTX_PATH="${GENERATED_PTX_DIR}/repeat_kv.ptx"
-  CHANNEL_SHUFFLE_PTX_PATH="${GENERATED_PTX_DIR}/channel_shuffle.ptx"
-  PIXEL_SHUFFLE_PTX_PATH="${GENERATED_PTX_DIR}/pixel_shuffle.ptx"
-  ADAPTIVE_AVG_POOL2D_PTX_PATH="${GENERATED_PTX_DIR}/adaptive_avg_pool2d.ptx"
-  LOCAL_RESPONSE_NORM_PTX_PATH="${GENERATED_PTX_DIR}/local_response_norm.ptx"
-  FUSED_ADD_NORM_PTX_PATH="${GENERATED_PTX_DIR}/fused_add_norm.ptx"
-  CUMSUM_PTX_PATH="${GENERATED_PTX_DIR}/cumsum.ptx"
-  GROUP_NORM_PTX_PATH="${GENERATED_PTX_DIR}/group_norm.ptx"
-  CONV_TRANSPOSE2D_PTX_PATH="${GENERATED_PTX_DIR}/conv_transpose2d.ptx"
-  PIXEL_UNSHUFFLE_PTX_PATH="${GENERATED_PTX_DIR}/pixel_unshuffle.ptx"
-  REFLECTION_PAD2D_PTX_PATH="${GENERATED_PTX_DIR}/reflection_pad2d.ptx"
-  UPSAMPLE_BILINEAR2D_PTX_PATH="${GENERATED_PTX_DIR}/upsample_bilinear2d.ptx"
-  ADAPTIVE_MAX_POOL2D_PTX_PATH="${GENERATED_PTX_DIR}/adaptive_max_pool2d.ptx"
-  ROTARY_EMBEDDING_PTX_PATH="${GENERATED_PTX_DIR}/rotary_embedding.ptx"
-  GATHER_PTX_PATH="${GENERATED_PTX_DIR}/gather.ptx"
-  SCATTER_ADD_PTX_PATH="${GENERATED_PTX_DIR}/scatter_add.ptx"
+  SOFTMAX_PTX_PATH="${GENERATED_PTX_DIR}/softmax_row.ptx"
 )
-add_dependencies(gpu_reference_runner
-  generate_bias_add_ptx
-  generate_batch_norm_ptx
-  generate_max_pool2d_ptx
-  generate_avg_pool2d_ptx
-  generate_layer_norm_ptx
-  generate_embedding_lookup_ptx
-  generate_transpose_ptx
-  generate_matmul_naive_ptx
-  generate_matmul_tiled_ptx
-  generate_softmax_row_ptx
-  generate_reduce_sum_ptx
-  generate_conv2d_naive_ptx
-  generate_conv2d_im2col_ptx
-  generate_conv2d_shared_ptx
-  generate_attention_scores_ptx
-  generate_gelu_ptx
-  generate_copy_ptx
-  generate_saxpy_ptx
-  generate_relu_ptx
-  generate_elementwise_add_ptx
-  generate_elementwise_mul_ptx
-  generate_scale_ptx
-  generate_mean_ptx
-  generate_dropout_ptx
-  generate_causal_mask_ptx
-  generate_residual_add_ptx
-  generate_rms_norm_ptx
-  generate_concat_ptx
-  generate_split_ptx
-  generate_argmax_ptx
-  generate_clamp_ptx
-  generate_neg_ptx
-  generate_square_ptx
-  generate_log_softmax_ptx
-  generate_cross_entropy_ptx
-  generate_sigmoid_ptx
-  generate_tanh_ptx
-  generate_silu_ptx
-  generate_reciprocal_ptx
-  generate_exp_ptx
-  generate_log_ptx
-  generate_sqrt_ptx
-  generate_pow_ptx
-  generate_rsqrt_ptx
-  generate_minimum_ptx
-  generate_maximum_ptx
-  generate_leaky_relu_ptx
-  generate_abs_ptx
-  generate_relu6_ptx
-  generate_softplus_ptx
-  generate_swiglu_ptx
-  generate_elu_ptx
-  generate_exp2_ptx
-  generate_log2_ptx
-  generate_floor_ptx
-  generate_ceil_ptx
-  generate_rint_ptx
-  generate_trunc_ptx
-  generate_acos_ptx
-  generate_erfc_ptx
-  generate_hard_sigmoid_ptx
-  generate_hardswish_ptx
-  generate_softsign_ptx
-  generate_log_sigmoid_ptx
-  generate_subtract_ptx
-  generate_divide_ptx
-  generate_copysign_ptx
-  generate_lerp_ptx
-  generate_cosh_ptx
-  generate_sinh_ptx
-  generate_asin_ptx
-  generate_atan_ptx
-  generate_cbrt_ptx
-  generate_mish_ptx
-  generate_expm1_ptx
-  generate_atan2_ptx
-  generate_hypot_ptx
-  generate_masked_fill_ptx
-  generate_alibi_bias_ptx
-  generate_global_avg_pool_ptx
-  generate_instance_norm_ptx
-  generate_pad2d_ptx
-  generate_upsample_nearest2d_ptx
-  generate_depthwise_conv2d_ptx
-  generate_repeat_kv_ptx
-  generate_channel_shuffle_ptx
-  generate_pixel_shuffle_ptx
-  generate_adaptive_avg_pool2d_ptx
-  generate_local_response_norm_ptx
-  generate_fused_add_norm_ptx
-  generate_cumsum_ptx
-  generate_group_norm_ptx
-  generate_conv_transpose2d_ptx
-  generate_pixel_unshuffle_ptx
-  generate_reflection_pad2d_ptx
-  generate_upsample_bilinear2d_ptx
-  generate_adaptive_max_pool2d_ptx
-  generate_rotary_embedding_ptx
-  generate_gather_ptx
-  generate_scatter_add_ptx
-)
-add_test(
-  NAME kernels.gpu_reference_differential
-  COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/reference/run_gpu_reference.py
-          --runner $<TARGET_FILE:gpu_reference_runner>
-          --cudart $<TARGET_FILE:cudart_shim>
-          --cuda $<TARGET_FILE:cuda_shim>
-          --core-dir $<TARGET_FILE_DIR:cudasim_core>
-)
+
+set(GPU_REFERENCE_PTX_TARGETS "")
+foreach(group IN LISTS KERNEL_GROUPS)
+  foreach(kernel IN LISTS KERNELS_${group})
+    list(APPEND GPU_REFERENCE_PTX_TARGETS generate_${kernel}_ptx)
+  endforeach()
+endforeach()
+add_dependencies(gpu_reference_runner ${GPU_REFERENCE_PTX_TARGETS})
+foreach(group IN LISTS KERNEL_GROUPS)
+  if(KERNELS_${group})
+    add_test(
+      NAME kernels.gpu_reference_differential_${group}
+      COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/reference/run_gpu_reference.py
+              --group ${group}
+              --runner $<TARGET_FILE:gpu_reference_runner>
+              --cudart $<TARGET_FILE:cudart_shim>
+              --cuda $<TARGET_FILE:cuda_shim>
+              --core-dir $<TARGET_FILE_DIR:cudasim_core>
+    )
+  endif()
+endforeach()
 
 add_executable(runtime_api_smoke
   compat/runtime_api_smoke.cpp

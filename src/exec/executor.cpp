@@ -352,7 +352,6 @@ bool coalesced_global_f32(const FlatInstruction &instruction,
           static_cast<std::uintptr_t>(registers.values[address->index][lane] +
                                       static_cast<std::uint64_t>(immediate))));
     }
-
     std::vector<std::uint32_t> values;
     cudasim::mem::coalesced_read_u32_pointers(addresses, values);
     for (std::size_t i = 0; i < lanes.size(); ++i) {
@@ -751,7 +750,39 @@ bool execute_instruction(
     return true;
   }
 
-  if (opcode == "selp.b32") {
+  if (opcode == "selp.b64") {
+    std::size_t pos = 0;
+    auto dst = parse_register(instruction.operand_tokens, pos);
+    auto a = parse_register(instruction.operand_tokens, pos);
+    auto b = parse_register(instruction.operand_tokens, pos);
+    while (pos < instruction.operand_tokens.size() &&
+           instruction.operand_tokens[pos].kind ==
+               cudasim::ptx::TokenKind::Comma) {
+      ++pos;
+    }
+    if (!dst || !a || !b || pos >= instruction.operand_tokens.size() ||
+        instruction.operand_tokens[pos].kind !=
+            cudasim::ptx::TokenKind::Percent) {
+      return false;
+    }
+    ++pos;
+    const std::string pred_name = instruction.operand_tokens[pos++].text;
+    std::size_t pred_index = 0;
+    for (std::size_t i = 1; i < pred_name.size(); ++i) {
+      pred_index =
+          pred_index * 10 + static_cast<std::size_t>(pred_name[i] - '0');
+    }
+    if (pred_index >= registers.predicates.size()) {
+      return false;
+    }
+    registers.values[dst->index][lane] = registers.predicates[pred_index][lane]
+                                             ? registers.values[a->index][lane]
+                                             : registers.values[b->index][lane];
+    next_pc = pc + 1;
+    return true;
+  }
+
+  if (opcode == "selp.b32" || opcode == "selp.u32" || opcode == "selp.s32") {
     std::size_t pos = 0;
     auto dst = parse_register(instruction.operand_tokens, pos);
     auto a =
@@ -874,11 +905,21 @@ bool execute_instruction(
       ++pos;
     }
     std::uint64_t bv = 0;
+    bool negative = false;
+    if (pos < instruction.operand_tokens.size() &&
+        instruction.operand_tokens[pos].kind ==
+            cudasim::ptx::TokenKind::Minus) {
+      negative = true;
+      ++pos;
+    }
     if (pos < instruction.operand_tokens.size() &&
         instruction.operand_tokens[pos].kind ==
             cudasim::ptx::TokenKind::Number) {
       bv = static_cast<std::uint64_t>(
           std::stoll(instruction.operand_tokens[pos].text));
+      if (negative) {
+        bv = static_cast<std::uint64_t>(-static_cast<std::int64_t>(bv));
+      }
     } else {
       auto b = parse_register(instruction.operand_tokens, pos);
       if (!b) {
@@ -1031,7 +1072,8 @@ bool execute_instruction(
     return true;
   }
 
-  if (opcode == "fma.rn.f32" || opcode == "fma.rm.f32") {
+  if (opcode == "fma.rn.f32" || opcode == "fma.rm.f32" ||
+      opcode == "fma.rz.f32") {
     std::size_t pos = 0;
     auto dst = parse_register(instruction.operand_tokens, pos);
     auto a =
@@ -1431,7 +1473,7 @@ bool execute_instruction(
     return true;
   }
 
-  if (opcode == "neg.s32" || opcode == "not.b32") {
+  if (opcode == "neg.s32" || opcode == "not.b32" || opcode == "abs.s32") {
     std::size_t pos = 0;
     auto dst = parse_register(instruction.operand_tokens, pos);
     auto a =
@@ -1439,10 +1481,15 @@ bool execute_instruction(
     if (!dst || !a) {
       return false;
     }
-    const std::uint32_t result =
-        opcode == "neg.s32"
-            ? static_cast<std::uint32_t>(-static_cast<std::int32_t>(*a))
-            : ~*a;
+    std::uint32_t result = 0;
+    if (opcode == "neg.s32") {
+      result = static_cast<std::uint32_t>(-static_cast<std::int32_t>(*a));
+    } else if (opcode == "not.b32") {
+      result = ~*a;
+    } else {
+      const std::int32_t av = static_cast<std::int32_t>(*a);
+      result = static_cast<std::uint32_t>(av < 0 ? -av : av);
+    }
     registers.values[dst->index][lane] = result;
     next_pc = pc + 1;
     return true;
@@ -1451,7 +1498,7 @@ bool execute_instruction(
   if (opcode == "add.s32" || opcode == "sub.s32" || opcode == "and.b32" ||
       opcode == "or.b32" || opcode == "xor.b32" || opcode == "mul.lo.s32" ||
       opcode == "div.s32" || opcode == "rem.s32" || opcode == "max.s32" ||
-      opcode == "min.s32") {
+      opcode == "min.s32" || opcode == "min.u32" || opcode == "max.u32") {
     std::size_t pos = 0;
     auto dst = parse_register(instruction.operand_tokens, pos);
     auto a =
@@ -1486,6 +1533,10 @@ bool execute_instruction(
     } else if (opcode == "min.s32") {
       result = static_cast<std::uint32_t>(std::min(
           static_cast<std::int32_t>(*a), static_cast<std::int32_t>(*b)));
+    } else if (opcode == "min.u32") {
+      result = std::min(*a, *b);
+    } else if (opcode == "max.u32") {
+      result = std::max(*a, *b);
     } else {
       result = *a * *b;
     }
@@ -1494,9 +1545,63 @@ bool execute_instruction(
     return true;
   }
 
+  if (opcode == "setp.eq.s64" || opcode == "setp.ne.s64") {
+    std::size_t pos = 0;
+    if (pos >= instruction.operand_tokens.size() ||
+        instruction.operand_tokens[pos].kind !=
+            cudasim::ptx::TokenKind::Percent) {
+      return false;
+    }
+    ++pos;
+    const std::string pred_name = instruction.operand_tokens[pos++].text;
+    std::size_t pred_index = 0;
+    for (std::size_t i = 1; i < pred_name.size(); ++i) {
+      pred_index =
+          pred_index * 10 + static_cast<std::size_t>(pred_name[i] - '0');
+    }
+    auto a = parse_register(instruction.operand_tokens, pos);
+    if (!a || pred_index >= registers.predicates.size()) {
+      return false;
+    }
+    while (pos < instruction.operand_tokens.size() &&
+           instruction.operand_tokens[pos].kind ==
+               cudasim::ptx::TokenKind::Comma) {
+      ++pos;
+    }
+    std::uint64_t bv = 0;
+    bool negative = false;
+    if (pos < instruction.operand_tokens.size() &&
+        instruction.operand_tokens[pos].kind ==
+            cudasim::ptx::TokenKind::Minus) {
+      negative = true;
+      ++pos;
+    }
+    if (pos < instruction.operand_tokens.size() &&
+        instruction.operand_tokens[pos].kind ==
+            cudasim::ptx::TokenKind::Number) {
+      bv = static_cast<std::uint64_t>(
+          std::stoll(instruction.operand_tokens[pos].text));
+      if (negative) {
+        bv = static_cast<std::uint64_t>(-static_cast<std::int64_t>(bv));
+      }
+    } else {
+      auto b = parse_register(instruction.operand_tokens, pos);
+      if (!b) {
+        return false;
+      }
+      bv = registers.values[b->index][lane];
+    }
+    const std::uint64_t av = registers.values[a->index][lane];
+    registers.predicates[pred_index][lane] =
+        opcode == "setp.eq.s64" ? av == bv : av != bv;
+    next_pc = pc + 1;
+    return true;
+  }
+
   if (opcode == "setp.lt.s32" || opcode == "setp.lt.u32" ||
       opcode == "setp.eq.s32" || opcode == "setp.gt.s32" ||
-      opcode == "setp.le.s32") {
+      opcode == "setp.le.s32" || opcode == "setp.eq.b32" ||
+      opcode == "setp.gt.u32") {
     std::size_t pos = 0;
     if (pos >= instruction.operand_tokens.size() ||
         instruction.operand_tokens[pos].kind !=
@@ -1517,7 +1622,7 @@ bool execute_instruction(
     if (!a || !b || pred_index >= registers.predicates.size()) {
       return false;
     }
-    if (opcode == "setp.eq.s32") {
+    if (opcode == "setp.eq.s32" || opcode == "setp.eq.b32") {
       registers.predicates[pred_index][lane] = *a == *b;
     } else if (opcode == "setp.lt.s32") {
       registers.predicates[pred_index][lane] =
@@ -1528,6 +1633,8 @@ bool execute_instruction(
     } else if (opcode == "setp.le.s32") {
       registers.predicates[pred_index][lane] =
           static_cast<std::int32_t>(*a) <= static_cast<std::int32_t>(*b);
+    } else if (opcode == "setp.gt.u32") {
+      registers.predicates[pred_index][lane] = *a > *b;
     } else {
       registers.predicates[pred_index][lane] = *a < *b;
     }
@@ -1554,7 +1661,7 @@ bool execute_instruction(
     return true;
   }
 
-  if (opcode == "cvt.rzi.s32.f32") {
+  if (opcode == "cvt.rzi.s32.f32" || opcode == "cvt.rzi.u32.f32") {
     std::size_t pos = 0;
     auto dst = parse_register(instruction.operand_tokens, pos);
     auto a =
@@ -1562,8 +1669,12 @@ bool execute_instruction(
     if (!dst || !a) {
       return false;
     }
-    const auto value = static_cast<std::int32_t>(*a);
-    registers.values[dst->index][lane] = static_cast<std::uint32_t>(value);
+    if (opcode == "cvt.rzi.s32.f32") {
+      registers.values[dst->index][lane] =
+          static_cast<std::uint32_t>(static_cast<std::int32_t>(*a));
+    } else {
+      registers.values[dst->index][lane] = static_cast<std::uint32_t>(*a);
+    }
     next_pc = pc + 1;
     return true;
   }
@@ -1599,9 +1710,11 @@ bool execute_instruction(
       opcode == "ex2.approx.ftz.f32" || opcode == "ex2.approx.f32" ||
       opcode == "abs.f32" || opcode == "cvt.rmi.f32.f32" ||
       opcode == "cvt.rpi.f32.f32" || opcode == "cvt.rni.f32.f32" ||
-      opcode == "lg2.approx.f32" || opcode == "rcp.approx.ftz.f32" ||
-      opcode == "rcp.rn.f32" || opcode == "cvt.rzi.f32.f32" ||
-      opcode == "rsqrt.approx.f32") {
+      opcode == "sin.approx.f32" || opcode == "cos.approx.f32" ||
+      opcode == "lg2.approx.f32" || opcode == "lg2.approx.ftz.f32" ||
+      opcode == "rcp.approx.ftz.f32" || opcode == "rcp.rn.f32" ||
+      opcode == "cvt.rzi.f32.f32" || opcode == "rsqrt.approx.f32" ||
+      opcode == "rsqrt.approx.ftz.f32") {
     std::size_t pos = 0;
     auto dst = parse_register(instruction.operand_tokens, pos);
     auto a =
@@ -1622,13 +1735,18 @@ bool execute_instruction(
       result = std::ceil(*a);
     } else if (opcode == "cvt.rni.f32.f32") {
       result = std::nearbyint(*a);
-    } else if (opcode == "lg2.approx.f32") {
+    } else if (opcode == "sin.approx.f32") {
+      result = std::sin(*a);
+    } else if (opcode == "cos.approx.f32") {
+      result = std::cos(*a);
+    } else if (opcode == "lg2.approx.f32" || opcode == "lg2.approx.ftz.f32") {
       result = std::log2(*a);
     } else if (opcode == "rcp.approx.ftz.f32" || opcode == "rcp.rn.f32") {
       result = 1.0F / *a;
     } else if (opcode == "cvt.rzi.f32.f32") {
       result = std::trunc(*a);
-    } else if (opcode == "rsqrt.approx.f32") {
+    } else if (opcode == "rsqrt.approx.f32" ||
+               opcode == "rsqrt.approx.ftz.f32") {
       result = 1.0F / std::sqrt(*a);
     } else {
       result = std::exp2(*a);

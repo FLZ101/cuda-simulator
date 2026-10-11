@@ -613,12 +613,10 @@ Current status:
 
 - Steps 0 through 8 are implemented and recorded in `steps/STEP_00.md` through
   `steps/STEP_08.md`.
-- Step 8's operator execution qualification portion is in progress.
-- The current blocker is `kernels.operator_differential`: `operator_runner`
-  links directly to `libcuda_shim`, so its unshimmed "GPU" run is still the
-  simulator. Replace it with an `nvcc`-compiled GPU reference runner that
-  dispatches by kernel name, then add the remaining missing PTX execution
-  semantics one operator at a time.
+- Step 8's `nvcc` operator execution qualification is implemented and green:
+  generated kernels are grouped into operator families and tested through one
+  CTest target per group with the real GPU as golden reference. The remaining
+  Step 8 work is the simple PyTorch-generated model CPU-reference flow.
 
 ### Step 0: Build and Test Skeleton
 

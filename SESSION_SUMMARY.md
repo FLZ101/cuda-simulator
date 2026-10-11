@@ -14,8 +14,9 @@ The simulator executes PTX only. It does not execute CUBIN/SASS.
 ## Current State
 
 The real-GPU differential harness is implemented and covers a broad operator
-corpus. Generated kernels are run on the real GPU as golden references and then
-run through the simulator shims for comparison.
+corpus. Generated kernels are grouped under `tests/kernels/<group>/`, and each
+group has its own CTest target. Kernels are run on the real GPU as golden
+references and then run through the simulator shims for comparison.
 
 Build:
 
@@ -39,7 +40,19 @@ make precommit
 
 ## Operator Harness
 
-Enabled operators:
+Enabled groups (each passes independently against the real GPU):
+
+- `elementwise`
+- `convolution`
+- `normalization`
+- `reduction`
+- `attention`
+- `indexing`
+- `loss`
+- `matrix`
+- `misc`
+
+Legacy enabled-operator breakdown:
 
 - elementwise: `copy`, `saxpy`, `relu`, `gelu`, `elementwise_add`,
   `elementwise_mul`, `scale`, `neg`, `square`, `tanh`, `sigmoid`, `silu`,
@@ -73,6 +86,8 @@ The adaptive-pooling and LRN kernels additionally required `not.b32` and
 Bilinear upsample requires `cvt.rzi.s32.f32` for float-to-int truncation.
 Scatter-add uses the PTX 8.x spelling `atom.global.add.f32`, which is handled
 as an alias of `atom.add.global.f32`.
+Attention kernels additionally required `setp.eq.s64`, `setp.ne.s64`,
+`abs.s32`, and `cos.approx.f32`.
 
 ## Important Implementation Details
 

@@ -1,0 +1,16 @@
+extern "C" __global__ void binary_cross_entropy_with_logits(
+    const float *a, const float *b, const float *c, const float *d,
+    const int *idx, float *out, int p0, int p1, int p2, int p3, int p4,
+    int p5, int p6, int p7, float f0, float f1, float f2, float f3) {
+  if (blockIdx.x != 0 || threadIdx.x != 0) {
+    return;
+  }
+  float sum = 0.0F;
+  for (int i = 0; i < p1; ++i) {
+    const float x = a[i];
+    const float loss = fmaxf(x, 0.0F) - x * b[i] +
+                       __logf(1.0F + __expf(-fabsf(x)));
+    sum += loss;
+  }
+  out[0] = sum / static_cast<float>(p1);
+}

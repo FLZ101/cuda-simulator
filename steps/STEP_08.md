@@ -436,28 +436,42 @@ Comparison requirements:
 - verification: `cmake --build build -j 4` and `ctest --test-dir build`
   are green; `kernels.gpu_reference_differential` passes with all 18 tests.
 
+- Reorganized generated kernels into operator-group subdirectories and wired
+  one CTest target per group through the generic PTX runner.
+- files: `tests/kernels/<group>/*.cu`, `tests/CMakeLists.txt`,
+  `tests/reference/gpu_reference_runner.cu`,
+  `tests/reference/run_gpu_reference.py`
+- verification: all nine `kernels.gpu_reference_differential_<group>` tests
+  pass independently.
+
+- Enabled the expanded attention group and fixed missing PTX execution
+  semantics exposed by its kernels: `setp.eq.s64`, `setp.ne.s64`, `abs.s32`,
+  and `cos.approx.f32`.
+- files: `src/exec/executor.cpp`
+- verification: `ctest --test-dir build -R kernels.gpu_reference_differential_attention`
+  passes, and the full 26-test CTest suite is green.
+
 ## Verification
 
 Commands run:
 
 ```bash
-make test
+cmake --build build -j 4
+ctest --test-dir build -R kernels.gpu_reference_differential_attention --output-on-failure
+ctest --test-dir build --output-on-failure
 ```
 
 Result:
 
 ```text
-100% tests passed, 0 tests failed out of 18
+100% tests passed, 0 tests failed out of 26
 ```
 
 Required before Step 9:
 
-- Every generated `nvcc` operator kernel must have an execution test against
-  the real GPU reference before ResNet integration starts.
-- Re-enable `kernels.gpu_reference_differential`.
-- Add the remaining missing PTX execution semantics one operator at a time
-  until every matrix operator passes.
-- PTX generation and SIMT-gate checks are not enough for operator correctness.
+- All nine operator-group differential tests pass against the real GPU.
+- The remaining Step 8 work is the simple PyTorch-generated model CPU-reference
+  flow, which is exercised again for full ResNet/GPT-2 models in Steps 9/10.
 
 ## Status
 
