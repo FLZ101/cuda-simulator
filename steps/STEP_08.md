@@ -399,6 +399,13 @@ Comparison requirements:
   `tests/reference/run_gpu_reference.py`, `tests/CMakeLists.txt`
 - verification: `make test` is green with all 18 tests passing.
 
+- Added CNN/LLM operator coverage: `masked_fill`, `alibi_bias`,
+  `global_avg_pool`, `instance_norm`, `pad2d`, `upsample_nearest2d`,
+  `depthwise_conv2d`, and `repeat_kv`.
+- files: `tests/kernels/*.cu`, `tests/reference/gpu_reference_runner.cu`,
+  `tests/reference/run_gpu_reference.py`, `tests/CMakeLists.txt`
+- verification: `make test` is green with all 18 tests passing.
+
 ## Verification
 
 Commands run:

@@ -49,15 +49,16 @@ Enabled operators:
   `hardswish`, `softsign`, `log_sigmoid`, `subtract`, `divide`, `copysign`,
   `lerp`, `cosh`, `sinh`, `asin`, `atan`, `cbrt`, `mish`, `expm1`, `atan2`,
   `hypot`
-- normalization: `batch_norm`, `layer_norm`, `rms_norm`
-- reduction: `reduce_sum`, `mean`, `argmax`
+- normalization: `batch_norm`, `layer_norm`, `rms_norm`, `instance_norm`
+- reduction: `reduce_sum`, `mean`, `argmax`, `global_avg_pool`
 - matrix: `matmul_naive`, `matmul_tiled`, `transpose`
 - convolution/pooling: `conv2d_naive`, `conv2d_im2col`, `conv2d_shared`,
-  `max_pool2d`, `avg_pool2d`
+  `max_pool2d`, `avg_pool2d`, `depthwise_conv2d`
 - transformer: `embedding_lookup`, `attention_scores`, `softmax_row`,
-  `log_softmax`, `causal_mask`, `dropout`
+  `log_softmax`, `causal_mask`, `dropout`, `masked_fill`, `alibi_bias`,
+  `repeat_kv`
 - data movement/reshape helpers: `concat`, `split`, `clamp`,
-  `cross_entropy`, `residual_add`
+  `cross_entropy`, `residual_add`, `pad2d`, `upsample_nearest2d`
 
 `pow` is enabled. Its optimized NVVM path required additional rounding,
 conversion, and unordered-comparison opcodes (`add.rn.f32`, `mul.rn.f32`,

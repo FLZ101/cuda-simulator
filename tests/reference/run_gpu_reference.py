@@ -87,6 +87,14 @@ SUPPORTED_OPERATORS = {
     "expm1",
     "atan2",
     "hypot",
+    "masked_fill",
+    "alibi_bias",
+    "global_avg_pool",
+    "instance_norm",
+    "pad2d",
+    "upsample_nearest2d",
+    "depthwise_conv2d",
+    "repeat_kv",
 }
 
 
@@ -152,6 +160,18 @@ def main():
         pos = [float(i + 1) for i in range(n)]
         pos_path = os.path.join(tmp, "pos.bin")
         write_floats(pos_path, pos)
+        zero_mask = [1.0 if i % 2 == 0 else 0.0 for i in range(n)]
+        zero_mask_path = os.path.join(tmp, "zero_mask.bin")
+        write_floats(zero_mask_path, zero_mask)
+        cnn_in = [float(i) for i in range(32)]
+        cnn_in_path = os.path.join(tmp, "cnn_in.bin")
+        write_floats(cnn_in_path, cnn_in)
+        cnn_weight = [0.25] * 16
+        cnn_weight_path = os.path.join(tmp, "cnn_weight.bin")
+        write_floats(cnn_weight_path, cnn_weight)
+        kv = [float((i % 5) - 2) for i in range(32)]
+        kv_path = os.path.join(tmp, "kv.bin")
+        write_floats(kv_path, kv)
         mask = [1.0 if i % 2 == 0 else 0.5 for i in range(n)]
         mask_path = os.path.join(tmp, "mask.bin")
         write_floats(mask_path, mask)
@@ -235,6 +255,38 @@ def main():
         run_pair("expm1", lambda out: [signed_path, str(n), out])
         run_pair("atan2", lambda out: [signed_path, pos_path, str(n), out])
         run_pair("hypot", lambda out: [x_path, y_path, str(n), out])
+        run_pair(
+            "masked_fill",
+            lambda out: [x_path, zero_mask_path, "-1.0", str(n), out],
+        )
+        run_pair(
+            "alibi_bias",
+            lambda out: [x_path, "2", "8", "4", out],
+        )
+        run_pair(
+            "global_avg_pool",
+            lambda out: [cnn_in_path, "4", "8", out],
+        )
+        run_pair(
+            "instance_norm",
+            lambda out: [cnn_in_path, "4", "8", "1e-5", out],
+        )
+        run_pair(
+            "pad2d",
+            lambda out: [cnn_in_path, "4", "4", "2", "1", "1", out],
+        )
+        run_pair(
+            "upsample_nearest2d",
+            lambda out: [cnn_in_path, "4", "4", "2", "2", out],
+        )
+        run_pair(
+            "depthwise_conv2d",
+            lambda out: [cnn_in_path, cnn_weight_path, "4", "4", "2", "3", "1", "2", "2", out],
+        )
+        run_pair(
+            "repeat_kv",
+            lambda out: [kv_path, "1", "2", "4", "4", "4", out],
+        )
         bias = [0.1, -0.2, 0.3, 0.4]
         bias_path = os.path.join(tmp, "bias.bin")
         write_floats(bias_path, bias)

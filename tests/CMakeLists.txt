@@ -106,6 +106,14 @@ set(CLASSIC_KERNEL_NAMES
   expm1
   atan2
   hypot
+  masked_fill
+  alibi_bias
+  global_avg_pool
+  instance_norm
+  pad2d
+  upsample_nearest2d
+  depthwise_conv2d
+  repeat_kv
 )
 
 add_custom_command(
@@ -358,6 +366,14 @@ target_compile_definitions(gpu_reference_runner PRIVATE
   EXPM1_PTX_PATH="${GENERATED_PTX_DIR}/expm1.ptx"
   ATAN2_PTX_PATH="${GENERATED_PTX_DIR}/atan2.ptx"
   HYPOT_PTX_PATH="${GENERATED_PTX_DIR}/hypot.ptx"
+  MASKED_FILL_PTX_PATH="${GENERATED_PTX_DIR}/masked_fill.ptx"
+  ALIBI_BIAS_PTX_PATH="${GENERATED_PTX_DIR}/alibi_bias.ptx"
+  GLOBAL_AVG_POOL_PTX_PATH="${GENERATED_PTX_DIR}/global_avg_pool.ptx"
+  INSTANCE_NORM_PTX_PATH="${GENERATED_PTX_DIR}/instance_norm.ptx"
+  PAD2D_PTX_PATH="${GENERATED_PTX_DIR}/pad2d.ptx"
+  UPSAMPLE_NEAREST2D_PTX_PATH="${GENERATED_PTX_DIR}/upsample_nearest2d.ptx"
+  DEPTHWISE_CONV2D_PTX_PATH="${GENERATED_PTX_DIR}/depthwise_conv2d.ptx"
+  REPEAT_KV_PTX_PATH="${GENERATED_PTX_DIR}/repeat_kv.ptx"
 )
 add_dependencies(gpu_reference_runner
   generate_bias_add_ptx
@@ -437,6 +453,14 @@ add_dependencies(gpu_reference_runner
   generate_expm1_ptx
   generate_atan2_ptx
   generate_hypot_ptx
+  generate_masked_fill_ptx
+  generate_alibi_bias_ptx
+  generate_global_avg_pool_ptx
+  generate_instance_norm_ptx
+  generate_pad2d_ptx
+  generate_upsample_nearest2d_ptx
+  generate_depthwise_conv2d_ptx
+  generate_repeat_kv_ptx
 )
 add_test(
   NAME kernels.gpu_reference_differential

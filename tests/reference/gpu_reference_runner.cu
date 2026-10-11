@@ -1145,6 +1145,237 @@ int main(int argc, char **argv) {
     return 0;
   }
 
+  if (mode == "masked_fill") {
+    if (argc != 7) {
+      return 73;
+    }
+    auto input = read_floats(argv[2]);
+    auto mask = read_floats(argv[3]);
+    const float value = std::stof(argv[4]);
+    const int n = std::stoi(argv[5]);
+    const std::size_t bytes = input.size() * sizeof(float);
+    CUdeviceptr d_in = alloc_copy(input.data(), bytes);
+    CUdeviceptr d_mask = alloc_copy(mask.data(), mask.size() * sizeof(float));
+    CUdeviceptr d_out = 0;
+    cuMemAlloc(&d_out, bytes);
+    int count = n;
+    float v = value;
+    std::vector<void *> params = {&d_in, &d_mask, &v, &d_out, &count};
+    CUfunction f = load_function(MASKED_FILL_PTX_PATH, "masked_fill");
+    if (!f || !launch_1d(f, params, n)) {
+      return 74;
+    }
+    std::vector<float> output(input.size());
+    cuMemcpyDtoH(output.data(), d_out, bytes);
+    write_floats(out_path, output);
+    return 0;
+  }
+
+  if (mode == "alibi_bias") {
+    if (argc != 7) {
+      return 75;
+    }
+    auto input = read_floats(argv[2]);
+    const int heads = std::stoi(argv[3]);
+    const int seq = std::stoi(argv[4]);
+    const int dim = std::stoi(argv[5]);
+    const int total = heads * seq * dim;
+    const std::size_t bytes = input.size() * sizeof(float);
+    CUdeviceptr d_in = alloc_copy(input.data(), bytes);
+    CUdeviceptr d_out = 0;
+    cuMemAlloc(&d_out, static_cast<std::size_t>(total) * sizeof(float));
+    int h = heads;
+    int s = seq;
+    int d = dim;
+    std::vector<void *> params = {&d_in, &d_out, &h, &s, &d};
+    CUfunction f = load_function(ALIBI_BIAS_PTX_PATH, "alibi_bias");
+    if (!f || !launch_1d(f, params, total)) {
+      return 76;
+    }
+    std::vector<float> output(static_cast<std::size_t>(total));
+    cuMemcpyDtoH(output.data(), d_out, output.size() * sizeof(float));
+    write_floats(out_path, output);
+    return 0;
+  }
+
+  if (mode == "global_avg_pool") {
+    if (argc != 6) {
+      return 77;
+    }
+    auto input = read_floats(argv[2]);
+    const int channels = std::stoi(argv[3]);
+    const int size = std::stoi(argv[4]);
+    CUdeviceptr d_in = alloc_copy(input.data(), input.size() * sizeof(float));
+    CUdeviceptr d_out = 0;
+    cuMemAlloc(&d_out, static_cast<std::size_t>(channels) * sizeof(float));
+    int c = channels;
+    int s = size;
+    std::vector<void *> params = {&d_in, &d_out, &c, &s};
+    CUfunction f = load_function(GLOBAL_AVG_POOL_PTX_PATH, "global_avg_pool");
+    if (!f || !launch_1d(f, params, channels, 1)) {
+      return 78;
+    }
+    std::vector<float> output(static_cast<std::size_t>(channels));
+    cuMemcpyDtoH(output.data(), d_out, output.size() * sizeof(float));
+    write_floats(out_path, output);
+    return 0;
+  }
+
+  if (mode == "instance_norm") {
+    if (argc != 7) {
+      return 79;
+    }
+    auto input = read_floats(argv[2]);
+    const int channels = std::stoi(argv[3]);
+    const int size = std::stoi(argv[4]);
+    const float eps = std::stof(argv[5]);
+    const std::size_t bytes = input.size() * sizeof(float);
+    CUdeviceptr d_in = alloc_copy(input.data(), bytes);
+    CUdeviceptr d_out = 0;
+    cuMemAlloc(&d_out, bytes);
+    int c = channels;
+    int s = size;
+    float e = eps;
+    std::vector<void *> params = {&d_in, &d_out, &c, &s, &e};
+    CUfunction f = load_function(INSTANCE_NORM_PTX_PATH, "instance_norm");
+    if (!f || !launch_1d(f, params, channels * size)) {
+      return 80;
+    }
+    std::vector<float> output(input.size());
+    cuMemcpyDtoH(output.data(), d_out, bytes);
+    write_floats(out_path, output);
+    return 0;
+  }
+
+  if (mode == "pad2d") {
+    if (argc != 9) {
+      return 81;
+    }
+    auto input = read_floats(argv[2]);
+    const int channels = std::stoi(argv[3]);
+    const int in_h = std::stoi(argv[4]);
+    const int in_w = std::stoi(argv[5]);
+    const int pad_h = std::stoi(argv[6]);
+    const int pad_w = std::stoi(argv[7]);
+    const int out_h = in_h + 2 * pad_h;
+    const int out_w = in_w + 2 * pad_w;
+    const int total = channels * out_h * out_w;
+    CUdeviceptr d_in = alloc_copy(input.data(), input.size() * sizeof(float));
+    CUdeviceptr d_out = 0;
+    cuMemAlloc(&d_out, static_cast<std::size_t>(total) * sizeof(float));
+    int c = channels;
+    int h = in_h;
+    int w = in_w;
+    int ph = pad_h;
+    int pw = pad_w;
+    std::vector<void *> params = {&d_in, &d_out, &c, &h, &w, &ph, &pw};
+    CUfunction f = load_function(PAD2D_PTX_PATH, "pad2d");
+    if (!f || !launch_1d(f, params, total)) {
+      return 82;
+    }
+    std::vector<float> output(static_cast<std::size_t>(total));
+    cuMemcpyDtoH(output.data(), d_out, output.size() * sizeof(float));
+    write_floats(out_path, output);
+    return 0;
+  }
+
+  if (mode == "upsample_nearest2d") {
+    if (argc != 8) {
+      return 83;
+    }
+    auto input = read_floats(argv[2]);
+    const int channels = std::stoi(argv[3]);
+    const int in_h = std::stoi(argv[4]);
+    const int in_w = std::stoi(argv[5]);
+    const int scale = std::stoi(argv[6]);
+    const int total = channels * in_h * scale * in_w * scale;
+    CUdeviceptr d_in = alloc_copy(input.data(), input.size() * sizeof(float));
+    CUdeviceptr d_out = 0;
+    cuMemAlloc(&d_out, static_cast<std::size_t>(total) * sizeof(float));
+    int c = channels;
+    int h = in_h;
+    int w = in_w;
+    int sc = scale;
+    std::vector<void *> params = {&d_in, &d_out, &c, &h, &w, &sc};
+    CUfunction f =
+        load_function(UPSAMPLE_NEAREST2D_PTX_PATH, "upsample_nearest2d");
+    if (!f || !launch_1d(f, params, total)) {
+      return 84;
+    }
+    std::vector<float> output(static_cast<std::size_t>(total));
+    cuMemcpyDtoH(output.data(), d_out, output.size() * sizeof(float));
+    write_floats(out_path, output);
+    return 0;
+  }
+
+  if (mode == "depthwise_conv2d") {
+    if (argc != 12) {
+      return 85;
+    }
+    auto input = read_floats(argv[2]);
+    auto weight = read_floats(argv[3]);
+    const int channels = std::stoi(argv[4]);
+    const int in_h = std::stoi(argv[5]);
+    const int in_w = std::stoi(argv[6]);
+    const int out_h = std::stoi(argv[7]);
+    const int out_w = std::stoi(argv[8]);
+    const int kh = std::stoi(argv[9]);
+    const int kw = std::stoi(argv[10]);
+    const int total = channels * out_h * out_w;
+    CUdeviceptr d_in = alloc_copy(input.data(), input.size() * sizeof(float));
+    CUdeviceptr d_weight =
+        alloc_copy(weight.data(), weight.size() * sizeof(float));
+    CUdeviceptr d_out = 0;
+    cuMemAlloc(&d_out, static_cast<std::size_t>(total) * sizeof(float));
+    int c = channels;
+    int h = in_h;
+    int w = in_w;
+    int oh = out_h;
+    int ow = out_w;
+    int kkh = kh;
+    int kkw = kw;
+    std::vector<void *> params = {&d_in, &d_weight, &d_out, &c,   &h,
+                                  &w,    &oh,       &ow,    &kkh, &kkw};
+    CUfunction f = load_function(DEPTHWISE_CONV2D_PTX_PATH, "depthwise_conv2d");
+    if (!f || !launch_1d(f, params, total)) {
+      return 86;
+    }
+    std::vector<float> output(static_cast<std::size_t>(total));
+    cuMemcpyDtoH(output.data(), d_out, output.size() * sizeof(float));
+    write_floats(out_path, output);
+    return 0;
+  }
+
+  if (mode == "repeat_kv") {
+    if (argc != 9) {
+      return 87;
+    }
+    auto input = read_floats(argv[2]);
+    const int batch = std::stoi(argv[3]);
+    const int kv_heads = std::stoi(argv[4]);
+    const int q_heads = std::stoi(argv[5]);
+    const int seq = std::stoi(argv[6]);
+    const int dim = std::stoi(argv[7]);
+    const int total = batch * q_heads * seq * dim;
+    CUdeviceptr d_in = alloc_copy(input.data(), input.size() * sizeof(float));
+    CUdeviceptr d_out = 0;
+    cuMemAlloc(&d_out, static_cast<std::size_t>(total) * sizeof(float));
+    int b = batch;
+    int kv = kv_heads;
+    int q = q_heads;
+    int s = seq;
+    int d = dim;
+    std::vector<void *> params = {&d_in, &d_out, &b, &kv, &q, &s, &d};
+    CUfunction f = load_function(REPEAT_KV_PTX_PATH, "repeat_kv");
+    if (!f || !launch_1d(f, params, total)) {
+      return 88;
+    }
+    std::vector<float> output(static_cast<std::size_t>(total));
+    cuMemcpyDtoH(output.data(), d_out, output.size() * sizeof(float));
+    write_floats(out_path, output);
+    return 0;
+  }
+
   if (mode == "leaky_relu") {
     if (argc != 6) {
       return 65;
