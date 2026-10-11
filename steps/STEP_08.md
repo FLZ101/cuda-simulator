@@ -327,6 +327,18 @@ Comparison requirements:
 - files: `src/exec/executor.cpp`, `tests/reference/run_gpu_reference.py`
 - verification: `make test` is green with `gelu` enabled and all target operators in the harness.
 
+- Added `copy`, `saxpy`, and `relu` to the real-GPU operator harness after removing the old demo runner.
+- files: `tests/reference/gpu_reference_runner.cu`, `tests/reference/run_gpu_reference.py`, `tests/CMakeLists.txt`
+- verification: `make test` is green with the full operator matrix in the real-GPU harness.
+
+- Added additional typical model kernels: `elementwise_add`, `elementwise_mul`, `scale`, and `mean`.
+- files: `tests/kernels/*.cu`, `tests/reference/gpu_reference_runner.cu`, `tests/reference/run_gpu_reference.py`, `tests/CMakeLists.txt`
+- verification: `make test` is green with the expanded real-GPU operator harness.
+
+- Added more transformer/ResNet-style kernels: `dropout`, `causal_mask`, `residual_add`, and `rms_norm`. Added `setp.le.s32` and negative `mov.u32` immediates.
+- files: `tests/kernels/*.cu`, `src/exec/executor.cpp`, `tests/reference/gpu_reference_runner.cu`, `tests/reference/run_gpu_reference.py`, `tests/CMakeLists.txt`
+- verification: `make test` is green with the expanded real-GPU operator harness.
+
 ## Verification
 
 Commands run:

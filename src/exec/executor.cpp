@@ -498,11 +498,22 @@ bool execute_instruction(
                cudasim::ptx::TokenKind::Comma) {
       ++pos;
     }
+    bool negative_immediate = false;
+    if (pos < instruction.operand_tokens.size() &&
+        instruction.operand_tokens[pos].kind ==
+            cudasim::ptx::TokenKind::Minus) {
+      negative_immediate = true;
+      ++pos;
+    }
     if (pos < instruction.operand_tokens.size() &&
         instruction.operand_tokens[pos].kind ==
             cudasim::ptx::TokenKind::Number) {
-      registers.values[dst->index][lane] = static_cast<std::uint32_t>(
+      const auto value = static_cast<std::uint32_t>(
           std::stoul(instruction.operand_tokens[pos].text));
+      registers.values[dst->index][lane] =
+          negative_immediate
+              ? static_cast<std::uint32_t>(-static_cast<std::int32_t>(value))
+              : value;
       next_pc = pc + 1;
       return true;
     }
@@ -1392,7 +1403,8 @@ bool execute_instruction(
   }
 
   if (opcode == "setp.lt.s32" || opcode == "setp.lt.u32" ||
-      opcode == "setp.eq.s32" || opcode == "setp.gt.s32") {
+      opcode == "setp.eq.s32" || opcode == "setp.gt.s32" ||
+      opcode == "setp.le.s32") {
     std::size_t pos = 0;
     if (pos >= instruction.operand_tokens.size() ||
         instruction.operand_tokens[pos].kind !=
@@ -1421,6 +1433,9 @@ bool execute_instruction(
     } else if (opcode == "setp.gt.s32") {
       registers.predicates[pred_index][lane] =
           static_cast<std::int32_t>(*a) > static_cast<std::int32_t>(*b);
+    } else if (opcode == "setp.le.s32") {
+      registers.predicates[pred_index][lane] =
+          static_cast<std::int32_t>(*a) <= static_cast<std::int32_t>(*b);
     } else {
       registers.predicates[pred_index][lane] = *a < *b;
     }

@@ -55,6 +55,63 @@ adding a plan.
    missing feature required by a real generated test.
 5. Add a regression test with every new instruction or API.
 
+## Adding a new kernel/operator
+
+When adding a new CUDA operator to the generated-kernel corpus:
+
+1. Add the CUDA source:
+
+   ```text
+   tests/kernels/<operator>.cu
+   ```
+
+   Use:
+
+   ```cuda
+   extern "C" __global__ void <operator>(...);
+   ```
+
+2. Add `<operator>` to `CLASSIC_KERNEL_NAMES` in `tests/CMakeLists.txt`.
+
+3. Add a PTX path macro to the `gpu_reference_runner` target:
+
+   ```cmake
+   <OPERATOR>_PTX_PATH="${GENERATED_PTX_DIR}/<operator>.ptx"
+   ```
+
+4. Add the matching generation dependency:
+
+   ```cmake
+   generate_<operator>_ptx
+   ```
+
+5. Add a dispatch branch in `tests/reference/gpu_reference_runner.cu` that:
+
+   - reads deterministic input files
+   - allocates/copies device memory
+   - loads the PTX function
+   - launches the kernel
+   - copies the result back
+   - writes the raw output file
+
+6. Add the operator to `SUPPORTED_OPERATORS` in
+   `tests/reference/run_gpu_reference.py`.
+
+7. Add a deterministic `run_pair("<operator>", ...)` case with the expected
+   arguments and input files.
+
+8. Verify:
+
+   ```bash
+   cmake --build build -j
+   make format-python
+   make test
+   make precommit
+   ```
+
+9. Record the work in `steps/STEP_08.md` and update `DESIGN.md` if this is a
+   new target operator category.
+
 ## Step recording guide
 
 Every implementation step must have a record file:

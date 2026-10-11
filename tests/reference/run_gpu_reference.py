@@ -24,6 +24,17 @@ SUPPORTED_OPERATORS = {
     "conv2d_shared",
     "attention_scores",
     "gelu",
+    "copy",
+    "saxpy",
+    "relu",
+    "elementwise_add",
+    "elementwise_mul",
+    "scale",
+    "mean",
+    "dropout",
+    "causal_mask",
+    "residual_add",
+    "rms_norm",
 }
 
 
@@ -77,8 +88,38 @@ def main():
         x = [float(i) for i in range(n)]
         x_path = os.path.join(tmp, "x.bin")
         write_floats(x_path, x)
+        y = [float(i * 2) for i in range(n)]
+        y_path = os.path.join(tmp, "y.bin")
+        write_floats(y_path, y)
+        mask = [1.0 if i % 2 == 0 else 0.5 for i in range(n)]
+        mask_path = os.path.join(tmp, "mask.bin")
+        write_floats(mask_path, mask)
+        causal = [float(i) for i in range(16)]
+        causal_path = os.path.join(tmp, "causal.bin")
+        write_floats(causal_path, causal)
         run_pair("gelu", lambda out: [x_path, str(n), out])
-
+        run_pair("copy", lambda out: [x_path, str(n), out])
+        run_pair("relu", lambda out: [x_path, str(n), out])
+        run_pair(
+            "saxpy",
+            lambda out: [x_path, y_path, "0.5", str(n), out],
+        )
+        run_pair(
+            "elementwise_add",
+            lambda out: [x_path, y_path, str(n), out],
+        )
+        run_pair(
+            "elementwise_mul",
+            lambda out: [x_path, y_path, str(n), out],
+        )
+        run_pair("scale", lambda out: [x_path, "0.5", str(n), out])
+        run_pair("mean", lambda out: [x_path, str(n), out])
+        run_pair("dropout", lambda out: [x_path, mask_path, str(n), out])
+        run_pair("causal_mask", lambda out: [causal_path, "4", out])
+        run_pair(
+            "residual_add",
+            lambda out: [x_path, y_path, str(n), out],
+        )
         bias = [0.1, -0.2, 0.3, 0.4]
         bias_path = os.path.join(tmp, "bias.bin")
         write_floats(bias_path, bias)
@@ -110,6 +151,10 @@ def main():
         ln_path = os.path.join(tmp, "ln.bin")
         write_floats(ln_path, ln_input)
         run_pair("layer_norm", lambda out: [ln_path, str(rows), str(hidden), "1e-5", out])
+        run_pair(
+            "rms_norm",
+            lambda out: [ln_path, str(rows), str(hidden), "1e-5", out],
+        )
 
         vocab, dim = 8, 8
         weight = [float((i * 3) % 11) for i in range(vocab * dim)]

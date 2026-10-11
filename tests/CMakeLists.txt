@@ -48,6 +48,14 @@ set(CLASSIC_KERNEL_NAMES
   attention_scores
   embedding_lookup
   gelu
+  elementwise_add
+  elementwise_mul
+  scale
+  mean
+  dropout
+  causal_mask
+  residual_add
+  rms_norm
 )
 
 add_custom_command(
@@ -239,6 +247,17 @@ target_compile_definitions(gpu_reference_runner PRIVATE
   CONV2D_SHARED_PTX_PATH="${GENERATED_PTX_DIR}/conv2d_shared.ptx"
   ATTENTION_PTX_PATH="${GENERATED_PTX_DIR}/attention_scores.ptx"
   GELU_PTX_PATH="${GENERATED_PTX_DIR}/gelu.ptx"
+  COPY_PTX_PATH="${GENERATED_COPY_PTX}"
+  SAXPY_PTX_PATH="${GENERATED_SAXPY_PTX}"
+  RELU_PTX_PATH="${GENERATED_RELU_PTX}"
+  ELEMENTWISE_ADD_PTX_PATH="${GENERATED_PTX_DIR}/elementwise_add.ptx"
+  ELEMENTWISE_MUL_PTX_PATH="${GENERATED_PTX_DIR}/elementwise_mul.ptx"
+  SCALE_PTX_PATH="${GENERATED_PTX_DIR}/scale.ptx"
+  MEAN_PTX_PATH="${GENERATED_PTX_DIR}/mean.ptx"
+  DROPOUT_PTX_PATH="${GENERATED_PTX_DIR}/dropout.ptx"
+  CAUSAL_MASK_PTX_PATH="${GENERATED_PTX_DIR}/causal_mask.ptx"
+  RESIDUAL_ADD_PTX_PATH="${GENERATED_PTX_DIR}/residual_add.ptx"
+  RMS_NORM_PTX_PATH="${GENERATED_PTX_DIR}/rms_norm.ptx"
 )
 add_dependencies(gpu_reference_runner
   generate_bias_add_ptx
@@ -257,6 +276,17 @@ add_dependencies(gpu_reference_runner
   generate_conv2d_shared_ptx
   generate_attention_scores_ptx
   generate_gelu_ptx
+  generate_copy_ptx
+  generate_saxpy_ptx
+  generate_relu_ptx
+  generate_elementwise_add_ptx
+  generate_elementwise_mul_ptx
+  generate_scale_ptx
+  generate_mean_ptx
+  generate_dropout_ptx
+  generate_causal_mask_ptx
+  generate_residual_add_ptx
+  generate_rms_norm_ptx
 )
 add_test(
   NAME kernels.gpu_reference_differential
