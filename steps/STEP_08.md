@@ -459,6 +459,25 @@ Comparison requirements:
 - verification: both new group tests pass independently; the full CTest suite
   is green with 28 tests.
 
+- Added the remaining qualification-matrix operators across all groups:
+  convolution `conv1d`, `conv3d`, `fold`, `unfold`, `deform_conv2d`;
+  normalization `weight_norm`, `spectral_norm`; reduction `median`,
+  `quantile`, `mode`, `searchsorted`; attention `cross_attention`,
+  `local_attention`; indexing `permute`, `reshape`, `squeeze`, `unsqueeze`,
+  `chunk`, `unbind`, `meshgrid`, `swapaxes`; loss `ctc_loss`,
+  `gaussian_nll_loss`, `multilabel_margin_loss`, `multimargin_loss`; matrix
+  `tensordot`, `kron`, `mv`, `bmm`; detection `diou`, `giou`,
+  `anchor_generate`, `batched_nms`, `generate_proposals`; sequence
+  `ctc_prefix_beam_search`, `attention_decoder`, `transformer_decoder`.
+  Widened the interpreter register file to 1024 entries per bank and moved the
+  `rd`/`f` bank bases so fully unrolled `permute` PTX (up to `r716`) cannot
+  alias `rd` or `f` registers.
+- files: `tests/kernels/<group>/*.cu`, `tests/CMakeLists.txt`,
+  `tests/reference/run_gpu_reference.py`, `src/exec/register_file.h`,
+  `src/exec/executor.cpp`
+- verification: all eleven operator-group differential tests and the full
+  CTest suite pass; 28/28 tests are green.
+
 ## Verification
 
 Commands run:
