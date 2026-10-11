@@ -636,6 +636,11 @@ Current status:
   CTest target per group with the real GPU as golden reference, including
   `detection` and `sequence` kernels. The remaining Step 8 work is the simple
   PyTorch-generated model CPU-reference flow.
+- Future work: replace the fixed 1024-entry virtual-register banks with a
+  `.reg`-declaration-driven `RegisterLayout` at PTX lowering. The current
+  direct mapping is sufficient for the existing corpus; a dynamic layout is
+  needed only when generated kernels exceed the fixed bank capacity or register
+  liveness reuse becomes worthwhile.
 
 ### Step 0: Build and Test Skeleton
 

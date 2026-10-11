@@ -9,6 +9,8 @@ namespace cudasim::exec {
 // register names emitted by NVVM, not physical SM registers. The shared size is
 // intentionally larger than the historical 256-entry `r` bank because NVVM can
 // emit register indices in the hundreds for unrolled kernels such as `permute`.
+// TODO: derive a per-function RegisterLayout from `.reg` declarations instead
+// of using fixed 1024-entry banks; see DESIGN.md Section 11 future work.
 inline constexpr std::size_t kRegisterBankSize = 1024;
 inline constexpr std::size_t kRegisterDBankBase = kRegisterBankSize;
 inline constexpr std::size_t kRegisterFBankBase =

@@ -149,6 +149,9 @@ bank, so generated indices such as `r716` do not alias `rd` or `f` registers.
 
 ## Next Steps
 
-1. Generate ResNet-style PyTorch runner and compare against PyTorch CPU.
-2. Generate GPT-2-style PyTorch runner and compare against PyTorch CPU.
-3. Add remaining missing PTX semantics as generated model runners expose them.
+1. Replace fixed virtual-register banks with a `.reg`-declaration-driven
+   `RegisterLayout` after a generated kernel exceeds the current 1024-per-bank
+   capacity.
+2. Generate ResNet-style PyTorch runner and compare against PyTorch CPU.
+3. Generate GPT-2-style PyTorch runner and compare against PyTorch CPU.
+4. Add remaining missing PTX semantics as generated model runners expose them.
