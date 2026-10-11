@@ -1,0 +1,92 @@
+# cuda-simulator Session Summary
+
+## Goal
+
+Build a CPU-hosted PTX simulator for externally generated CUDA programs.
+
+v1 correctness targets:
+
+- ResNet-18 or ResNet-50 forward pass
+- GPT-2 124M forward pass
+
+The simulator executes PTX only. It does not execute CUBIN/SASS.
+
+## Current State
+
+The real-GPU differential harness is implemented and covers a broad operator
+corpus. Generated kernels are run on the real GPU as golden references and then
+run through the simulator shims for comparison.
+
+Build:
+
+```bash
+make build
+make test
+```
+
+Python formatting and pre-commit:
+
+```bash
+make format-python
+make precommit
+```
+
+## Reference Policy
+
+- Hand-written `nvcc` CUDA kernels use real GPU output as the golden reference.
+- PyTorch-generated model runners use PyTorch CPU reference.
+- Early smoke tests may use a host CPU reference.
+
+## Operator Harness
+
+Enabled operators:
+
+- elementwise: `copy`, `saxpy`, `relu`, `gelu`, `elementwise_add`,
+  `elementwise_mul`, `scale`, `neg`, `square`, `tanh`, `sigmoid`, `silu`,
+  `reciprocal`, `exp`, `log`, `sqrt`
+- normalization: `batch_norm`, `layer_norm`, `rms_norm`
+- reduction: `reduce_sum`, `mean`, `argmax`
+- matrix: `matmul_naive`, `matmul_tiled`, `transpose`
+- convolution/pooling: `conv2d_naive`, `conv2d_im2col`, `conv2d_shared`,
+  `max_pool2d`, `avg_pool2d`
+- transformer: `embedding_lookup`, `attention_scores`, `softmax_row`,
+  `log_softmax`, `causal_mask`, `dropout`
+- data movement/reshape helpers: `concat`, `split`, `clamp`,
+  `cross_entropy`, `residual_add`
+
+`pow` source and PTX generation exist, but it is not enabled yet because its
+optimized NVVM path requires additional rounding/convert opcodes.
+
+## Important Implementation Details
+
+- Register banks are separated:
+  - `r` base `0`
+  - `rd` base `256`
+  - `f` base `512`
+- Special registers support `x`, `y`, and `z` components.
+- `bar.sync` uses block-wide lane arrival tracking.
+- Dynamic `.extern .shared` arrays are parsed and sized from
+  `config.shared_memory`.
+- Global memory offset parsing supports signed offsets.
+- FMA instructions use `std::fmaf`.
+- `cvt.sat.f32.f32` clamps to `[0.0, 1.0]`.
+- Tensor-core instructions are rejected by `tests/generated/check_simt.py`.
+
+## Key Files
+
+- `DESIGN.md`
+- `AGENTS.md`
+- `steps/STEP_08.md`
+- `src/exec/executor.cpp`
+- `src/exec/register_file.h`
+- `src/ptx/parser.cpp`
+- `tests/reference/gpu_reference_runner.cu`
+- `tests/reference/run_gpu_reference.py`
+- `tests/CMakeLists.txt`
+
+## Next Steps
+
+1. Finish missing `pow` semantics and enable it.
+2. Generate ResNet-style PyTorch runner and compare against PyTorch CPU.
+3. Generate GPT-2-style PyTorch runner and compare against PyTorch CPU.
+4. Add remaining missing PTX semantics as generated model runners expose them.
