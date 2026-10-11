@@ -55,6 +55,10 @@ parse_register(const std::vector<cudasim::ptx::Token> &tokens,
          tokens[pos].kind == cudasim::ptx::TokenKind::Comma) {
     ++pos;
   }
+  if (pos < tokens.size() &&
+      tokens[pos].kind == cudasim::ptx::TokenKind::LBrace) {
+    ++pos;
+  }
   if (pos >= tokens.size() ||
       tokens[pos].kind != cudasim::ptx::TokenKind::Percent) {
     return std::nullopt;
@@ -102,6 +106,10 @@ parse_register(const std::vector<cudasim::ptx::Token> &tokens,
   }
   ref.index = base + index;
   ref.size = (bank == 'd' || bank == 'f') ? 8 : 4;
+  if (pos < tokens.size() &&
+      tokens[pos].kind == cudasim::ptx::TokenKind::RBrace) {
+    ++pos;
+  }
   return ref;
 }
 
@@ -973,7 +981,7 @@ bool execute_instruction(
     return true;
   }
 
-  if (opcode == "ld.global.u32") {
+  if (opcode == "ld.global.u32" || opcode == "ld.global.b32") {
     std::size_t pos = 0;
     auto dst = parse_register(instruction.operand_tokens, pos);
     if (!dst) {
@@ -1139,7 +1147,7 @@ bool execute_instruction(
     return true;
   }
 
-  if (opcode == "st.global.u32") {
+  if (opcode == "st.global.u32" || opcode == "st.global.b32") {
     std::size_t pos = 0;
     while (pos < instruction.operand_tokens.size() &&
            instruction.operand_tokens[pos].kind !=

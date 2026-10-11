@@ -195,7 +195,16 @@ Function Parser::parse_function(Module &module) {
       }
 
       expect(TokenKind::Dot, "expected parameter type");
-      const std::string type = read_identifier_path();
+      const std::string type =
+          expect(TokenKind::Identifier, "expected parameter type").text;
+      while (current_.kind == TokenKind::Dot) {
+        consume();
+        const std::string param_qualifier =
+            expect(TokenKind::Identifier, "expected parameter qualifier").text;
+        if (param_qualifier == "align") {
+          expect(TokenKind::Number, "expected parameter alignment");
+        }
+      }
       const std::string name =
           expect(TokenKind::Identifier, "expected parameter name").text;
       std::size_t size = 8;
@@ -228,6 +237,10 @@ Function Parser::parse_function(Module &module) {
         module.variables.push_back(parse_variable(qualifier));
         continue;
       }
+      if (qualifier == "loc" || qualifier == "file" || qualifier == "section") {
+        read_until_newline();
+        continue;
+      }
       read_until_semicolon();
       continue;
     }
@@ -246,6 +259,9 @@ Instruction Parser::parse_instruction() {
     instruction.label = expect(TokenKind::Identifier, "expected label").text;
     expect(TokenKind::Colon, "expected ':' after label");
     skip_newlines();
+    if (current_.kind == TokenKind::Dollar) {
+      return instruction;
+    }
   }
 
   if (current_.kind == TokenKind::At) {
@@ -266,7 +282,14 @@ Instruction Parser::parse_instruction() {
   }
 
   if (current_.kind == TokenKind::Dot) {
-    read_until_semicolon();
+    consume();
+    const std::string qualifier =
+        expect(TokenKind::Identifier, "expected directive").text;
+    if (qualifier == "loc" || qualifier == "file" || qualifier == "section") {
+      read_until_newline();
+    } else {
+      read_until_semicolon();
+    }
     return instruction;
   }
 

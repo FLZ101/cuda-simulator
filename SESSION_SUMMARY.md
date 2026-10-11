@@ -18,6 +18,12 @@ corpus. Generated kernels are grouped under `tests/kernels/<group>/`, and each
 group has its own CTest target. Kernels are run on the real GPU as golden
 references and then run through the simulator shims for comparison.
 
+PyTorch-generated models are converted into runners through
+`tests/models/model_runner.py`. Each spec emits a native CUDA runner with
+embedded Triton PTX; `--mode cpu` runs the PyTorch model on CPU, while
+`--mode gpu --simulate` runs the native runner under the CUDA shims. The runner
+never takes PTX text as input.
+
 Build:
 
 ```bash
@@ -134,6 +140,8 @@ bank, so generated indices such as `r716` do not alias `rd` or `f` registers.
 - FMA instructions use `std::fmaf`.
 - `cvt.sat.f32.f32` clamps to `[0.0, 1.0]`.
 - Tensor-core instructions are rejected by `tests/generated/check_simt.py`.
+- Triton-generated PTX uses embedded PTX in the generated native runner; model
+  PTX is never passed to a runner CLI argument.
 
 ## Key Files
 
@@ -145,6 +153,8 @@ bank, so generated indices such as `r716` do not alias `rd` or `f` registers.
 - `src/ptx/parser.cpp`
 - `tests/reference/gpu_reference_runner.cu`
 - `tests/reference/run_gpu_reference.py`
+- `tests/models/model_runner.py`
+- `tests/models/generate_model_runner.py`
 - `tests/CMakeLists.txt`
 
 ## Next Steps
@@ -152,6 +162,6 @@ bank, so generated indices such as `r716` do not alias `rd` or `f` registers.
 1. Replace fixed virtual-register banks with a `.reg`-declaration-driven
    `RegisterLayout` after a generated kernel exceeds the current 1024-per-bank
    capacity.
-2. Generate ResNet-style PyTorch runner and compare against PyTorch CPU.
-3. Generate GPT-2-style PyTorch runner and compare against PyTorch CPU.
-4. Add remaining missing PTX semantics as generated model runners expose them.
+2. Extend the model-runner converter to lower full traced PyTorch graphs
+   (ResNet-style and GPT-2-style) to native runners with embedded SIMT PTX.
+3. Add remaining missing PTX semantics as generated model runners expose them.

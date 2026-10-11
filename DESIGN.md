@@ -20,8 +20,10 @@ generated externally; the simulator only executes the resulting PTX.
 
 These are fixed v1 decisions.
 
-- Run a standalone CUDA host executable or shared library.
-- Do not run a full PyTorch/Python process.
+- Run a standalone CUDA host executable or shared library for GPU/simulator
+  execution.
+- CPU reference mode may run the original PyTorch model on CPU. The simulator
+  execution path does not run a full PyTorch/Python process.
 - Use `LD_PRELOAD` on the generated host program.
 - Prefer dynamically linked CUDA runtime. Static `libcudart` is not a target.
 - Accept PTX only. Reject CUBIN/SASS.
@@ -1019,7 +1021,15 @@ Steps:
    torch.save(reference, "reference.pt")
    ```
 
-3. Generate `model_runner` from the same traced graph. The target pipeline is:
+3. Convert the traced graph into a generated `model_runner`. The generated
+   runner has two modes:
+
+   - `--mode cpu` runs the original PyTorch model on CPU and writes the
+     reference output.
+   - `--mode gpu` runs a generated native CUDA host program. The PTX is
+     embedded in that program; the runner never accepts PTX text as input.
+
+   The target lowering pipeline is:
 
    ```text
    traced PyTorch graph
@@ -1037,23 +1047,23 @@ Steps:
    nvcc links the wrapper into ./model_runner
    ```
 
-   The wrapper contract is:
+   The generated native wrapper contract is:
 
    - `--input input.raw`
    - `--output output.raw`
    - allocate device memory and copy inputs
    - launch all generated kernels in graph order
    - copy final output back to host
+   - contain embedded PTX only, never CUBIN/SASS and never a `--ptx` input
 
-   The generated runner must embed or load PTX only, never CUBIN/SASS. Tensor
-   cores are disallowed, so TorchInductor/Triton must use the SIMT path and the
-   generated PTX must pass the tensor-core gate.
+   Tensor cores are disallowed, so TorchInductor/Triton must use the SIMT path
+   and the generated PTX must pass the tensor-core gate.
 
 4. Run the generated host runner through the simulator:
 
    ```bash
    LD_PRELOAD=libcudart_shim.so:libcuda_shim.so \
-     ./model_runner --input input.raw --output simulator_output.raw
+     ./model_runner --mode gpu --input input.raw --output simulator_output.raw
    ```
 
 5. Compare simulator output with the PyTorch CPU reference:

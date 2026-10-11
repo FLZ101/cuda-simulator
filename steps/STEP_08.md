@@ -29,8 +29,10 @@ tests/differential/compare.py
 tests/reference/gpu_reference_runner.cu
 tests/reference/run_gpu_reference.py
 tests/models/compare_torch_reference.py
-tests/models/export_simple_model_reference.py
-tests/models/generate_simple_model_runner.py
+tests/models/model_runner.py
+tests/models/generate_model_runner.py
+tests/models/specs/vector_add.py
+tests/models/specs/matmul.py
 ```
 
 ## Acceptance Checks
@@ -119,8 +121,10 @@ Target files:
 
 ```text
 tests/models/compare_torch_reference.py
-tests/models/export_simple_model_reference.py
-tests/models/generate_simple_model_runner.py
+tests/models/model_runner.py
+tests/models/generate_model_runner.py
+tests/models/specs/vector_add.py
+tests/models/specs/matmul.py
 ```
 
 Reference export for a simple model:
@@ -478,6 +482,24 @@ Comparison requirements:
 - verification: all eleven operator-group differential tests and the full
   CTest suite pass; 28/28 tests are green.
 
+- Added the PyTorch-generated model runner conversion flow. Each supported
+  model spec generates a native CUDA runner with embedded Triton PTX; a common
+  Python runner exposes `--mode cpu` (PyTorch CPU reference) and
+  `--mode gpu` (native runner, with optional `--simulate` to inject the CUDA
+  shims). PTX is no longer accepted as a runner input. Parser support was
+  extended for Triton `.param .ptr .global .align` parameter qualifiers and
+  line-oriented `.loc` directives. The executor now handles brace-enclosed
+  register operands and `ld.global.b32`/`st.global.b32` aliases used by Triton
+  inline PTX.
+- files: `tests/models/model_runner.py`,
+  `tests/models/generate_model_runner.py`,
+  `tests/models/compare_torch_reference.py`,
+  `tests/models/specs/vector_add.py`, `tests/models/specs/matmul.py`,
+  `tests/CMakeLists.txt`, `src/ptx/parser.cpp`, `src/exec/executor.cpp`
+- verification: `models.vector_add.runner_cpu`,
+  `models.vector_add.runner_sim`, `models.matmul.runner_cpu`, and
+  `models.matmul.runner_sim` pass.
++
 ## Verification
 
 Commands run:
@@ -486,13 +508,14 @@ Commands run:
 cmake --build build -j 4
 ctest --test-dir build -R kernels.gpu_reference_differential_detection --output-on-failure
 ctest --test-dir build -R kernels.gpu_reference_differential_sequence --output-on-failure
+ctest --test-dir build -R 'models\.(vector_add|matmul)\.runner_(cpu|sim)' --output-on-failure
 ctest --test-dir build --output-on-failure
 ```
 
 Result:
 
 ```text
-100% tests passed, 0 tests failed out of 28
+100% tests passed, 0 tests failed out of 32
 ```
 
 Required before Step 9:

@@ -530,6 +530,105 @@ foreach(group IN LISTS KERNEL_GROUPS)
   endif()
 endforeach()
 
+set(SIM_PYTHON ${CMAKE_SOURCE_DIR}/.venv/bin/python)
+
+set(GENERATED_MODEL_DIR ${CMAKE_CURRENT_BINARY_DIR}/models/generated)
+set(VECTOR_ADD_RUNNER_SRC ${GENERATED_MODEL_DIR}/vector_add_runner.cu)
+set(MATMUL_RUNNER_SRC ${GENERATED_MODEL_DIR}/matmul_runner.cu)
+
+add_custom_command(
+  OUTPUT ${VECTOR_ADD_RUNNER_SRC}
+  COMMAND ${SIM_PYTHON} ${CMAKE_CURRENT_SOURCE_DIR}/models/generate_model_runner.py
+          --spec vector_add
+          --output-cpp ${VECTOR_ADD_RUNNER_SRC}
+          --n 32
+          --block 32
+  DEPENDS
+    ${CMAKE_CURRENT_SOURCE_DIR}/models/generate_model_runner.py
+    ${CMAKE_CURRENT_SOURCE_DIR}/models/specs/vector_add.py
+  VERBATIM
+)
+
+add_executable(vector_add_model_runner ${VECTOR_ADD_RUNNER_SRC})
+set_target_properties(vector_add_model_runner PROPERTIES
+  CUDA_STANDARD 20
+  CUDA_STANDARD_REQUIRED ON
+  CUDA_ARCHITECTURES 86
+)
+target_link_libraries(vector_add_model_runner PRIVATE CUDA::cuda_driver)
+
+add_test(
+  NAME models.vector_add.runner_cpu
+  COMMAND ${SIM_PYTHON} ${CMAKE_CURRENT_SOURCE_DIR}/models/model_runner.py
+          --spec vector_add
+          --mode cpu
+          --runner $<TARGET_FILE:vector_add_model_runner>
+          --cudart $<TARGET_FILE:cudart_shim>
+          --cuda $<TARGET_FILE:cuda_shim>
+          --core-dir $<TARGET_FILE_DIR:cudasim_core>
+          --output-dir ${CMAKE_CURRENT_BINARY_DIR}/models/vector_add
+)
+add_test(
+  NAME models.vector_add.runner_sim
+  COMMAND ${SIM_PYTHON} ${CMAKE_CURRENT_SOURCE_DIR}/models/model_runner.py
+          --spec vector_add
+          --mode gpu
+          --simulate
+          --compare
+          --runner $<TARGET_FILE:vector_add_model_runner>
+          --cudart $<TARGET_FILE:cudart_shim>
+          --cuda $<TARGET_FILE:cuda_shim>
+          --core-dir $<TARGET_FILE_DIR:cudasim_core>
+          --output-dir ${CMAKE_CURRENT_BINARY_DIR}/models/vector_add
+)
+
+add_custom_command(
+  OUTPUT ${MATMUL_RUNNER_SRC}
+  COMMAND ${SIM_PYTHON} ${CMAKE_CURRENT_SOURCE_DIR}/models/generate_model_runner.py
+          --spec matmul
+          --output-cpp ${MATMUL_RUNNER_SRC}
+          --m 8
+          --n 8
+          --k 8
+  DEPENDS
+    ${CMAKE_CURRENT_SOURCE_DIR}/models/generate_model_runner.py
+    ${CMAKE_CURRENT_SOURCE_DIR}/models/specs/matmul.py
+  VERBATIM
+)
+
+add_executable(matmul_model_runner ${MATMUL_RUNNER_SRC})
+set_target_properties(matmul_model_runner PROPERTIES
+  CUDA_STANDARD 20
+  CUDA_STANDARD_REQUIRED ON
+  CUDA_ARCHITECTURES 86
+)
+target_link_libraries(matmul_model_runner PRIVATE CUDA::cuda_driver)
+
+add_test(
+  NAME models.matmul.runner_cpu
+  COMMAND ${SIM_PYTHON} ${CMAKE_CURRENT_SOURCE_DIR}/models/model_runner.py
+          --spec matmul
+          --mode cpu
+          --runner $<TARGET_FILE:matmul_model_runner>
+          --cudart $<TARGET_FILE:cudart_shim>
+          --cuda $<TARGET_FILE:cuda_shim>
+          --core-dir $<TARGET_FILE_DIR:cudasim_core>
+          --output-dir ${CMAKE_CURRENT_BINARY_DIR}/models/matmul
+)
+add_test(
+  NAME models.matmul.runner_sim
+  COMMAND ${SIM_PYTHON} ${CMAKE_CURRENT_SOURCE_DIR}/models/model_runner.py
+          --spec matmul
+          --mode gpu
+          --simulate
+          --compare
+          --runner $<TARGET_FILE:matmul_model_runner>
+          --cudart $<TARGET_FILE:cudart_shim>
+          --cuda $<TARGET_FILE:cuda_shim>
+          --core-dir $<TARGET_FILE_DIR:cudasim_core>
+          --output-dir ${CMAKE_CURRENT_BINARY_DIR}/models/matmul
+)
+
 add_executable(runtime_api_smoke
   compat/runtime_api_smoke.cpp
 )
