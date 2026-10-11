@@ -113,9 +113,8 @@ bool launch_1d(CUfunction function, const std::vector<void *> &params, int n,
                         nullptr) == CUDA_SUCCESS;
 }
 
-bool launch_1d_shared(CUfunction function,
-                      const std::vector<void *> &params, int n, int block,
-                      std::size_t shared_mem) {
+bool launch_1d_shared(CUfunction function, const std::vector<void *> &params,
+                      int n, int block, std::size_t shared_mem) {
   const unsigned int blocks =
       (static_cast<unsigned int>(n) + static_cast<unsigned int>(block) - 1) /
       static_cast<unsigned int>(block);
@@ -348,8 +347,7 @@ int main(int argc, char **argv) {
     const std::string ptx =
         mode == "matmul_naive" ? MATMUL_NAIVE_PTX_PATH : MATMUL_TILED_PTX_PATH;
     CUfunction f = load_function(ptx, name);
-    const bool ok =
-        launch_2d(f, params, (n + 15) / 16, (m + 15) / 16, 16, 16);
+    const bool ok = launch_2d(f, params, (n + 15) / 16, (m + 15) / 16, 16, 16);
     if (!f || !ok) {
       return 15;
     }
@@ -589,9 +587,9 @@ int main(int argc, char **argv) {
     cuMemAlloc(&d_out, bytes);
     int count = n;
     std::vector<void *> params = {&d_a, &d_b, &d_out, &count};
-    const std::string ptx =
-        mode == "elementwise_add" ? ELEMENTWISE_ADD_PTX_PATH
-                                  : ELEMENTWISE_MUL_PTX_PATH;
+    const std::string ptx = mode == "elementwise_add"
+                                ? ELEMENTWISE_ADD_PTX_PATH
+                                : ELEMENTWISE_MUL_PTX_PATH;
     const std::string name =
         mode == "elementwise_add" ? "elementwise_add" : "elementwise_mul";
     CUfunction f = load_function(ptx, name);
@@ -686,8 +684,7 @@ int main(int argc, char **argv) {
     int s = seq_len;
     std::vector<void *> params = {&d_scores, &s};
     CUfunction f = load_function(CAUSAL_MASK_PTX_PATH, "causal_mask");
-    if (!f ||
-        !launch_2d(f, params, (seq_len + 255) / 256, seq_len, 256, 1)) {
+    if (!f || !launch_2d(f, params, (seq_len + 255) / 256, seq_len, 256, 1)) {
       return 40;
     }
     std::vector<float> output(input.size());
@@ -930,7 +927,7 @@ int main(int argc, char **argv) {
 
   if (mode == "sigmoid" || mode == "tanh" || mode == "silu" ||
       mode == "reciprocal" || mode == "exp" || mode == "log" ||
-      mode == "sqrt") {
+      mode == "sqrt" || mode == "rsqrt") {
     if (argc != 5) {
       return 59;
     }
@@ -962,6 +959,9 @@ int main(int argc, char **argv) {
     } else if (mode == "sqrt") {
       ptx = SQRT_PTX_PATH;
       name = "sqrt_kernel";
+    } else if (mode == "rsqrt") {
+      ptx = RSQRT_PTX_PATH;
+      name = "rsqrt_kernel";
     } else {
       ptx = RECIPROCAL_PTX_PATH;
       name = "reciprocal";
@@ -993,6 +993,57 @@ int main(int argc, char **argv) {
     CUfunction f = load_function(POW_PTX_PATH, "pow_kernel");
     if (!f || !launch_1d(f, params, n)) {
       return 62;
+    }
+    std::vector<float> output(input.size());
+    cuMemcpyDtoH(output.data(), d_out, bytes);
+    write_floats(out_path, output);
+    return 0;
+  }
+
+  if (mode == "minimum" || mode == "maximum") {
+    if (argc != 6) {
+      return 63;
+    }
+    auto a = read_floats(argv[2]);
+    auto b = read_floats(argv[3]);
+    const int n = std::stoi(argv[4]);
+    const std::size_t bytes = a.size() * sizeof(float);
+    CUdeviceptr d_a = alloc_copy(a.data(), bytes);
+    CUdeviceptr d_b = alloc_copy(b.data(), b.size() * sizeof(float));
+    CUdeviceptr d_out = 0;
+    cuMemAlloc(&d_out, bytes);
+    int count = n;
+    std::vector<void *> params = {&d_a, &d_b, &d_out, &count};
+    const std::string ptx =
+        mode == "minimum" ? MINIMUM_PTX_PATH : MAXIMUM_PTX_PATH;
+    const std::string name = mode == "minimum" ? "min_kernel" : "max_kernel";
+    CUfunction f = load_function(ptx, name);
+    if (!f || !launch_1d(f, params, n)) {
+      return 64;
+    }
+    std::vector<float> output(a.size());
+    cuMemcpyDtoH(output.data(), d_out, bytes);
+    write_floats(out_path, output);
+    return 0;
+  }
+
+  if (mode == "leaky_relu") {
+    if (argc != 6) {
+      return 65;
+    }
+    auto input = read_floats(argv[2]);
+    const float alpha = std::stof(argv[3]);
+    const int n = std::stoi(argv[4]);
+    const std::size_t bytes = input.size() * sizeof(float);
+    CUdeviceptr d_in = alloc_copy(input.data(), bytes);
+    CUdeviceptr d_out = 0;
+    cuMemAlloc(&d_out, bytes);
+    int count = n;
+    float a = alpha;
+    std::vector<void *> params = {&d_in, &d_out, &a, &count};
+    CUfunction f = load_function(LEAKY_RELU_PTX_PATH, "leaky_relu");
+    if (!f || !launch_1d(f, params, n)) {
+      return 66;
     }
     std::vector<float> output(input.size());
     cuMemcpyDtoH(output.data(), d_out, bytes);

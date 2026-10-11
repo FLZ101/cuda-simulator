@@ -52,6 +52,11 @@ SUPPORTED_OPERATORS = {
     "exp",
     "log",
     "sqrt",
+    "pow",
+    "rsqrt",
+    "minimum",
+    "maximum",
+    "leaky_relu",
 }
 
 
@@ -108,6 +113,9 @@ def main():
         y = [float(i * 2) for i in range(n)]
         y_path = os.path.join(tmp, "y.bin")
         write_floats(y_path, y)
+        signed = [float((i % 7) - 3) for i in range(n)]
+        signed_path = os.path.join(tmp, "signed.bin")
+        write_floats(signed_path, signed)
         mask = [1.0 if i % 2 == 0 else 0.5 for i in range(n)]
         mask_path = os.path.join(tmp, "mask.bin")
         write_floats(mask_path, mask)
@@ -157,6 +165,10 @@ def main():
         run_pair("log", lambda out: [y_path, str(n), out])
         run_pair("sqrt", lambda out: [y_path, str(n), out])
         run_pair("pow", lambda out: [y_path, "2.0", str(n), out])
+        run_pair("rsqrt", lambda out: [y_path, str(n), out])
+        run_pair("minimum", lambda out: [x_path, y_path, str(n), out])
+        run_pair("maximum", lambda out: [x_path, y_path, str(n), out])
+        run_pair("leaky_relu", lambda out: [signed_path, "0.01", str(n), out])
         bias = [0.1, -0.2, 0.3, 0.4]
         bias_path = os.path.join(tmp, "bias.bin")
         write_floats(bias_path, bias)

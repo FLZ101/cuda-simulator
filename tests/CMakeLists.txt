@@ -72,6 +72,10 @@ set(CLASSIC_KERNEL_NAMES
   log
   sqrt
   pow
+  rsqrt
+  minimum
+  maximum
+  leaky_relu
 )
 
 add_custom_command(
@@ -290,6 +294,10 @@ target_compile_definitions(gpu_reference_runner PRIVATE
   LOG_PTX_PATH="${GENERATED_PTX_DIR}/log.ptx"
   SQRT_PTX_PATH="${GENERATED_PTX_DIR}/sqrt.ptx"
   POW_PTX_PATH="${GENERATED_PTX_DIR}/pow.ptx"
+  RSQRT_PTX_PATH="${GENERATED_PTX_DIR}/rsqrt.ptx"
+  MINIMUM_PTX_PATH="${GENERATED_PTX_DIR}/minimum.ptx"
+  MAXIMUM_PTX_PATH="${GENERATED_PTX_DIR}/maximum.ptx"
+  LEAKY_RELU_PTX_PATH="${GENERATED_PTX_DIR}/leaky_relu.ptx"
 )
 add_dependencies(gpu_reference_runner
   generate_bias_add_ptx
@@ -335,6 +343,10 @@ add_dependencies(gpu_reference_runner
   generate_log_ptx
   generate_sqrt_ptx
   generate_pow_ptx
+  generate_rsqrt_ptx
+  generate_minimum_ptx
+  generate_maximum_ptx
+  generate_leaky_relu_ptx
 )
 add_test(
   NAME kernels.gpu_reference_differential

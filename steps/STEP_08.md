@@ -359,6 +359,20 @@ Comparison requirements:
 - files: `tests/kernels/exp.cu`, `tests/kernels/log.cu`, `tests/kernels/sqrt.cu`, `tests/kernels/pow.cu`, `src/exec/executor.cpp`, `tests/reference/gpu_reference_runner.cu`, `tests/reference/run_gpu_reference.py`, `tests/CMakeLists.txt`
 - verification: `make test` is green with the current supported subset.
 
+- Enabled `pow` in the real-GPU operator harness. Added `add.rn.f32`,
+  `mul.rn.f32`, `cvt.rn.f32.u32`, `cvt.rzi.f32.f32`, `xor.b32`,
+  `setp.geu.f32`, `setp.gtu.f32`, and `setp.neu.f32`.
+- files: `src/exec/executor.cpp`, `tests/reference/run_gpu_reference.py`
+- verification: `make test` is green with `pow` enabled and all 18 tests passing.
+
+- Added `rsqrt`, `minimum`, `maximum`, and `leaky_relu` kernels to the
+  real-GPU operator harness. Added `rsqrt.approx.f32` and `min.f32`.
+- files: `tests/kernels/rsqrt.cu`, `tests/kernels/minimum.cu`,
+  `tests/kernels/maximum.cu`, `tests/kernels/leaky_relu.cu`,
+  `src/exec/executor.cpp`, `tests/reference/gpu_reference_runner.cu`,
+  `tests/reference/run_gpu_reference.py`, `tests/CMakeLists.txt`
+- verification: `make test` is green with all 18 tests passing.
+
 ## Verification
 
 Commands run:

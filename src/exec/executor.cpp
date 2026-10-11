@@ -666,7 +666,9 @@ bool execute_instruction(
   }
 
   if (opcode == "setp.ge.f32" || opcode == "setp.gt.f32" ||
-      opcode == "setp.lt.f32" || opcode == "setp.eq.f32") {
+      opcode == "setp.lt.f32" || opcode == "setp.eq.f32" ||
+      opcode == "setp.geu.f32" || opcode == "setp.gtu.f32" ||
+      opcode == "setp.neu.f32") {
     std::size_t pos = 0;
     if (pos >= instruction.operand_tokens.size() ||
         instruction.operand_tokens[pos].kind !=
@@ -687,14 +689,21 @@ bool execute_instruction(
     if (!a || !b || pred_index >= registers.predicates.size()) {
       return false;
     }
+    const bool unordered = std::isnan(*a) || std::isnan(*b);
     if (opcode == "setp.ge.f32") {
       registers.predicates[pred_index][lane] = *a >= *b;
     } else if (opcode == "setp.gt.f32") {
       registers.predicates[pred_index][lane] = *a > *b;
     } else if (opcode == "setp.lt.f32") {
       registers.predicates[pred_index][lane] = *a < *b;
-    } else {
+    } else if (opcode == "setp.eq.f32") {
       registers.predicates[pred_index][lane] = *a == *b;
+    } else if (opcode == "setp.geu.f32") {
+      registers.predicates[pred_index][lane] = *a >= *b || unordered;
+    } else if (opcode == "setp.gtu.f32") {
+      registers.predicates[pred_index][lane] = *a > *b || unordered;
+    } else {
+      registers.predicates[pred_index][lane] = *a != *b || unordered;
     }
     next_pc = pc + 1;
     return true;
@@ -949,7 +958,7 @@ bool execute_instruction(
     return true;
   }
 
-  if (opcode == "add.f32") {
+  if (opcode == "add.f32" || opcode == "add.rn.f32") {
     std::size_t pos = 0;
     auto dst = parse_register(instruction.operand_tokens, pos);
     auto a = parse_register(instruction.operand_tokens, pos);
@@ -978,7 +987,7 @@ bool execute_instruction(
     return true;
   }
 
-  if (opcode == "max.f32") {
+  if (opcode == "max.f32" || opcode == "min.f32") {
     std::size_t pos = 0;
     auto dst = parse_register(instruction.operand_tokens, pos);
     auto a =
@@ -988,7 +997,8 @@ bool execute_instruction(
     if (!dst || !a || !b) {
       return false;
     }
-    const float result = std::fmax(*a, *b);
+    const float result =
+        opcode == "max.f32" ? std::fmax(*a, *b) : std::fmin(*a, *b);
     std::uint32_t bits = 0;
     std::memcpy(&bits, &result, sizeof(bits));
     registers.values[dst->index][lane] = bits;
@@ -996,7 +1006,7 @@ bool execute_instruction(
     return true;
   }
 
-  if (opcode == "mul.f32") {
+  if (opcode == "mul.f32" || opcode == "mul.rn.f32") {
     std::size_t pos = 0;
     auto dst = parse_register(instruction.operand_tokens, pos);
     auto a =
@@ -1414,8 +1424,8 @@ bool execute_instruction(
   }
 
   if (opcode == "add.s32" || opcode == "sub.s32" || opcode == "and.b32" ||
-      opcode == "or.b32" || opcode == "mul.lo.s32" || opcode == "div.s32" ||
-      opcode == "rem.s32") {
+      opcode == "or.b32" || opcode == "xor.b32" || opcode == "mul.lo.s32" ||
+      opcode == "div.s32" || opcode == "rem.s32") {
     std::size_t pos = 0;
     auto dst = parse_register(instruction.operand_tokens, pos);
     auto a =
@@ -1434,6 +1444,8 @@ bool execute_instruction(
       result = *a & *b;
     } else if (opcode == "or.b32") {
       result = *a | *b;
+    } else if (opcode == "xor.b32") {
+      result = *a ^ *b;
     } else if (opcode == "div.s32") {
       const auto av = static_cast<std::int32_t>(*a);
       const auto bv = static_cast<std::int32_t>(*b);
@@ -1491,7 +1503,7 @@ bool execute_instruction(
     return true;
   }
 
-  if (opcode == "cvt.rn.f32.s32") {
+  if (opcode == "cvt.rn.f32.s32" || opcode == "cvt.rn.f32.u32") {
     std::size_t pos = 0;
     auto dst = parse_register(instruction.operand_tokens, pos);
     auto src =
@@ -1499,7 +1511,10 @@ bool execute_instruction(
     if (!dst || !src) {
       return false;
     }
-    const float value = static_cast<float>(static_cast<std::int32_t>(*src));
+    const float value =
+        opcode == "cvt.rn.f32.s32"
+            ? static_cast<float>(static_cast<std::int32_t>(*src))
+            : static_cast<float>(*src);
     std::uint32_t bits = 0;
     std::memcpy(&bits, &value, sizeof(bits));
     registers.values[dst->index][lane] = bits;
@@ -1536,7 +1551,8 @@ bool execute_instruction(
 
   if (opcode == "neg.f32" || opcode == "cvt.sat.f32.f32" ||
       opcode == "ex2.approx.ftz.f32" || opcode == "abs.f32" ||
-      opcode == "rcp.approx.ftz.f32" || opcode == "rcp.rn.f32") {
+      opcode == "rcp.approx.ftz.f32" || opcode == "rcp.rn.f32" ||
+      opcode == "cvt.rzi.f32.f32" || opcode == "rsqrt.approx.f32") {
     std::size_t pos = 0;
     auto dst = parse_register(instruction.operand_tokens, pos);
     auto a =
@@ -1553,6 +1569,10 @@ bool execute_instruction(
       result = std::fabs(*a);
     } else if (opcode == "rcp.approx.ftz.f32" || opcode == "rcp.rn.f32") {
       result = 1.0F / *a;
+    } else if (opcode == "cvt.rzi.f32.f32") {
+      result = std::trunc(*a);
+    } else if (opcode == "rsqrt.approx.f32") {
+      result = 1.0F / std::sqrt(*a);
     } else {
       result = std::exp2(*a);
     }

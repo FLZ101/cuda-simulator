@@ -43,7 +43,8 @@ Enabled operators:
 
 - elementwise: `copy`, `saxpy`, `relu`, `gelu`, `elementwise_add`,
   `elementwise_mul`, `scale`, `neg`, `square`, `tanh`, `sigmoid`, `silu`,
-  `reciprocal`, `exp`, `log`, `sqrt`
+  `reciprocal`, `exp`, `log`, `sqrt`, `pow`, `rsqrt`, `minimum`, `maximum`,
+  `leaky_relu`
 - normalization: `batch_norm`, `layer_norm`, `rms_norm`
 - reduction: `reduce_sum`, `mean`, `argmax`
 - matrix: `matmul_naive`, `matmul_tiled`, `transpose`
@@ -54,8 +55,9 @@ Enabled operators:
 - data movement/reshape helpers: `concat`, `split`, `clamp`,
   `cross_entropy`, `residual_add`
 
-`pow` source and PTX generation exist, but it is not enabled yet because its
-optimized NVVM path requires additional rounding/convert opcodes.
+`pow` is enabled. Its optimized NVVM path required additional rounding,
+conversion, and unordered-comparison opcodes (`add.rn.f32`, `mul.rn.f32`,
+`cvt.rn.f32.u32`, `cvt.rzi.f32.f32`, `xor.b32`, and `setp.*u.f32`).
 
 ## Important Implementation Details
 
@@ -86,7 +88,6 @@ optimized NVVM path requires additional rounding/convert opcodes.
 
 ## Next Steps
 
-1. Finish missing `pow` semantics and enable it.
-2. Generate ResNet-style PyTorch runner and compare against PyTorch CPU.
-3. Generate GPT-2-style PyTorch runner and compare against PyTorch CPU.
-4. Add remaining missing PTX semantics as generated model runners expose them.
+1. Generate ResNet-style PyTorch runner and compare against PyTorch CPU.
+2. Generate GPT-2-style PyTorch runner and compare against PyTorch CPU.
+3. Add remaining missing PTX semantics as generated model runners expose them.
