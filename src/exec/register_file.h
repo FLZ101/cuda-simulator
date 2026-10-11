@@ -5,7 +5,8 @@
 
 namespace cudasim::exec {
 
-// Each PTX register bank owns a disjoint range in `values`. The shared size is
+// Each PTX register bank owns a disjoint range in `values`. These are virtual
+// register names emitted by NVVM, not physical SM registers. The shared size is
 // intentionally larger than the historical 256-entry `r` bank because NVVM can
 // emit register indices in the hundreds for unrolled kernels such as `permute`.
 inline constexpr std::size_t kRegisterBankSize = 1024;

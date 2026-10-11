@@ -363,6 +363,24 @@ register R -> lane[0], lane[1], ..., lane[31]
 
 This layout is required for later vectorized/JIT execution.
 
+PTX operands such as `%r716`, `%rd91`, and `%f31` are virtual register names
+emitted by NVVM. They are not physical GPU register-file indices. Aggressive
+compiler unrolling can produce hundreds of virtual `%r` names even though the
+hardware register allocator later packs them into at most 255 physical
+registers per thread. The interpreter must therefore provide enough virtual
+register storage for the generated names and keep each name bank disjoint:
+
+```text
+%r<0..N>  -> 0..1023
+%rd<0..N> -> 1024..2047
+%f<0..N>  -> 2048..3071
+```
+
+Do not treat these virtual names as a model of the physical SM register file.
+For reference, modern NVIDIA SMs provide 64K 32-bit physical registers
+(256 KB) per SM and allow at most 255 physical registers per thread. The
+virtual PTX namespace can be much larger than that cap after NVVM unrolling.
+
 ### Warp scheduling and barriers
 
 Warps cannot run independently to completion when `bar.sync` exists. Each block

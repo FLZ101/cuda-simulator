@@ -118,8 +118,14 @@ bank, so generated indices such as `r716` do not alias `rd` or `f` registers.
 
 - Register banks are separated:
   - `r` base `0`
-  - `rd` base `256`
-  - `f` base `512`
+  - `rd` base `1024`
+  - `f` base `2048`
+- PTX `%r`, `%rd`, and `%f` operands are virtual register names, not physical
+  GPU registers. The interpreter keeps each virtual bank in a disjoint range
+  and does not apply the hardware 255-register-per-thread limit to them.
+- Modern NVIDIA SMs have 64K 32-bit physical registers (256 KB) per SM and a
+  255-register-per-thread limit. This physical capacity does not bound the
+  virtual register indices emitted in PTX.
 - Special registers support `x`, `y`, and `z` components.
 - `bar.sync` uses block-wide lane arrival tracking.
 - Dynamic `.extern .shared` arrays are parsed and sized from
