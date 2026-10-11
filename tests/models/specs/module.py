@@ -2,6 +2,7 @@
 
 import argparse
 import importlib.util
+import operator
 import pathlib
 import re
 import struct
@@ -226,6 +227,60 @@ def adaptive_avgpool2d_1x1_kernel(
     tl.store(out_ptr + pid, acc / (H * W))
 
 
+@triton.jit
+def binary_kernel(a_ptr, b_ptr, out_ptr, n, BLOCK: tl.constexpr, mode: tl.constexpr):
+    pid = tl.program_id(0)
+    offsets = pid * BLOCK + tl.arange(0, BLOCK)
+    mask = offsets < n
+    a = tl.load(a_ptr + offsets, mask=mask)
+    b = tl.load(b_ptr + offsets, mask=mask)
+    y = a + b if mode == 0 else a * b
+    tl.store(out_ptr + offsets, y, mask=mask)
+
+
+@triton.jit
+def layernorm_kernel(
+    x_ptr,
+    weight_ptr,
+    bias_ptr,
+    out_ptr,
+    N: tl.constexpr,
+    eps: tl.constexpr,
+):
+    pid = tl.program_id(0)
+    row = pid // N
+    col = pid % N
+    mean = 0.0
+    for j in tl.range(0, N):
+        mean += tl.load(x_ptr + row * N + j)
+    mean = mean / N
+    var = 0.0
+    for j in tl.range(0, N):
+        value = tl.load(x_ptr + row * N + j)
+        var += (value - mean) * (value - mean)
+    var = var / N
+    x = tl.load(x_ptr + pid)
+    weight = tl.load(weight_ptr + col)
+    bias = tl.load(bias_ptr + col)
+    y = (x - mean) / tl.sqrt(var + eps) * weight + bias
+    tl.store(out_ptr + pid, y)
+
+
+@triton.jit
+def softmax_kernel(x_ptr, out_ptr, N: tl.constexpr):
+    pid = tl.program_id(0)
+    row = pid // N
+    col = pid % N
+    max_value = float("-inf")
+    for j in tl.range(0, N):
+        max_value = tl.maximum(max_value, tl.load(x_ptr + row * N + j))
+    denominator = 0.0
+    for j in tl.range(0, N):
+        denominator += tl.exp(tl.load(x_ptr + row * N + j) - max_value)
+    x = tl.load(x_ptr + pid)
+    tl.store(out_ptr + pid, tl.exp(x - max_value) / denominator)
+
+
 def add_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--module-file", required=True)
     parser.add_argument("--batch", type=int, default=4)
@@ -372,6 +427,24 @@ def _adaptive_avg_pool_nodes(traced):
             yield node, module
 
 
+def _layer_norm_nodes(traced):
+    for node in traced.graph.nodes:
+        if node.op != "call_module":
+            continue
+        module = traced.get_submodule(node.target)
+        if isinstance(module, torch.nn.LayerNorm):
+            yield node, module
+
+
+def _softmax_nodes(traced):
+    for node in traced.graph.nodes:
+        if node.op != "call_module":
+            continue
+        module = traced.get_submodule(node.target)
+        if isinstance(module, torch.nn.Softmax):
+            yield node, module
+
+
 def _activation_mode(module):
     if isinstance(module, torch.nn.GELU):
         if not module.approximate == "none":
@@ -417,6 +490,23 @@ def _predecessor_name(node):
     if not isinstance(value, torch.fx.Node):
         raise RuntimeError(f"unsupported input for node {node.name}")
     return value.name
+
+
+def _binary_input_names(node):
+    if len(node.args) < 2:
+        raise RuntimeError(f"unsupported binary call: {node.name}")
+    left, right = node.args[:2]
+    if not isinstance(left, torch.fx.Node) or not isinstance(right, torch.fx.Node):
+        raise RuntimeError(f"unsupported binary inputs for node {node.name}")
+    return left.name, right.name
+
+
+def _binary_mode(node):
+    if node.target is operator.add:
+        return 0
+    if node.target is operator.mul:
+        return 1
+    raise RuntimeError(f"unsupported binary target: {node.target}")
 
 
 def _shape_map(traced, example_input):
@@ -530,10 +620,25 @@ def _shape_map(traced, example_input):
                 ),
             ):
                 shapes[node.name] = input_shape
+            elif isinstance(module, torch.nn.LayerNorm):
+                if len(input_shape) < 2:
+                    raise RuntimeError(f"unsupported LayerNorm input shape: {input_shape}")
+                if list(module.normalized_shape) != [input_shape[-1]]:
+                    raise RuntimeError("only last-dim LayerNorm is supported")
+                shapes[node.name] = input_shape
+            elif isinstance(module, torch.nn.Softmax):
+                if module.dim not in (-1, len(input_shape) - 1):
+                    raise RuntimeError("only last-dim Softmax is supported")
+                shapes[node.name] = input_shape
             elif isinstance(module, torch.nn.ReLU):
                 shapes[node.name] = input_shape
             else:
                 raise RuntimeError(f"unsupported module in traced graph: {type(module).__name__}")
+        elif node.op == "call_function" and node.target in (operator.add, operator.mul):
+            left_name, right_name = _binary_input_names(node)
+            if shapes[left_name] != shapes[right_name]:
+                raise RuntimeError(f"mismatched binary input shapes for {node.name}")
+            shapes[node.name] = shapes[left_name]
         else:
             raise RuntimeError(f"unsupported traced node: {node.op} {node.name}")
     return shapes
@@ -543,6 +648,18 @@ def _graph_program(traced, shapes):
     program = []
     for node in traced.graph.nodes:
         if node.op in ("placeholder", "output"):
+            continue
+        if node.op == "call_function" and node.target in (operator.add, operator.mul):
+            left_name, right_name = _binary_input_names(node)
+            program.append(
+                {
+                    "kind": "binary",
+                    "name": node.name,
+                    "inputs": (left_name, right_name),
+                    "mode": _binary_mode(node),
+                    "shape": shapes[node.name],
+                }
+            )
             continue
         module = traced.get_submodule(node.target)
         input_name = _predecessor_name(node)
@@ -673,6 +790,27 @@ def _graph_program(traced, shapes):
                     "shape": shapes[node.name],
                 }
             )
+        elif isinstance(module, torch.nn.LayerNorm):
+            program.append(
+                {
+                    "kind": "layernorm",
+                    "name": node.name,
+                    "input": input_name,
+                    "normalized_size": shapes[input_name][-1],
+                    "eps": module.eps,
+                    "shape": shapes[node.name],
+                }
+            )
+        elif isinstance(module, torch.nn.Softmax):
+            program.append(
+                {
+                    "kind": "softmax",
+                    "name": node.name,
+                    "input": input_name,
+                    "normalized_size": shapes[input_name][-1],
+                    "shape": shapes[node.name],
+                }
+            )
         elif isinstance(module, torch.nn.ReLU):
             program.append(
                 {
@@ -727,6 +865,12 @@ def run_cpu(args: argparse.Namespace, output_dir: pathlib.Path) -> None:
         _write_floats(output_dir / f"bn_bias{index}.bin", bias)
         _write_floats(output_dir / f"bn_mean{index}.bin", mean)
         _write_floats(output_dir / f"bn_var{index}.bin", var)
+    for index, (_, module) in enumerate(_layer_norm_nodes(traced)):
+        normalized_size = module.normalized_shape[0]
+        weight = module.weight if module.weight is not None else torch.ones(normalized_size)
+        bias = module.bias if module.bias is not None else torch.zeros(normalized_size)
+        _write_floats(output_dir / f"ln_weight{index}.bin", weight)
+        _write_floats(output_dir / f"ln_bias{index}.bin", bias)
 
 
 def native_arguments(args: argparse.Namespace, output_dir: pathlib.Path) -> list[str]:
@@ -734,6 +878,7 @@ def native_arguments(args: argparse.Namespace, output_dir: pathlib.Path) -> list
     traced = _trace(model)
     weighted = list(_weighted_nodes(traced))
     batch_norms = list(_batch_norm_nodes(traced))
+    layer_norms = list(_layer_norm_nodes(traced))
     arguments = [
         "--input",
         str(output_dir / "input.bin"),
@@ -760,6 +905,15 @@ def native_arguments(args: argparse.Namespace, output_dir: pathlib.Path) -> list
                 str(output_dir / f"bn_mean{index}.bin"),
                 f"--bn-var{index}",
                 str(output_dir / f"bn_var{index}.bin"),
+            ]
+        )
+    for index, _ in enumerate(layer_norms):
+        arguments.extend(
+            [
+                f"--ln-weight{index}",
+                str(output_dir / f"ln_weight{index}.bin"),
+                f"--ln-bias{index}",
+                str(output_dir / f"ln_bias{index}.bin"),
             ]
         )
     return arguments
@@ -812,6 +966,18 @@ def _adaptive_avg_pool_index(adaptive_avg_pools, op):
     return next(index for index, candidate in enumerate(adaptive_avg_pools) if candidate is op)
 
 
+def _binary_index(binaries, op):
+    return next(index for index, candidate in enumerate(binaries) if candidate is op)
+
+
+def _layer_norm_index(layer_norms, op):
+    return next(index for index, candidate in enumerate(layer_norms) if candidate is op)
+
+
+def _softmax_index(softmaxes, op):
+    return next(index for index, candidate in enumerate(softmaxes) if candidate is op)
+
+
 def _weighted_index(weighted_ops, op):
     return next(index for index, candidate in enumerate(weighted_ops) if candidate is op)
 
@@ -833,6 +999,9 @@ def generate_native_runner(args: argparse.Namespace, output_path: pathlib.Path) 
     max_pools = [op for op in program if op["kind"] == "maxpool2d"]
     avg_pools = [op for op in program if op["kind"] == "avgpool2d"]
     adaptive_avg_pools = [op for op in program if op["kind"] == "adaptive_avgpool2d"]
+    binaries = [op for op in program if op["kind"] == "binary"]
+    layer_norms = [op for op in program if op["kind"] == "layernorm"]
+    softmaxes = [op for op in program if op["kind"] == "softmax"]
     weighted = [op for op in program if op["kind"] in ("linear", "conv2d")]
 
     ptx_by_key = {}
@@ -1006,6 +1175,51 @@ def generate_native_runner(args: argparse.Namespace, output_path: pathlib.Path) 
         )
         ptx_by_key[f"adaptive_avgpool2d_{index}"] = ptx
 
+    for index, op in enumerate(binaries):
+        count = _numel(op["shape"])
+        a = torch.empty(count, device="cuda", dtype=torch.float32)
+        b = torch.empty(count, device="cuda", dtype=torch.float32)
+        out = torch.empty(count, device="cuda", dtype=torch.float32)
+        ptx = _compile_kernel(
+            binary_kernel,
+            (1,),
+            (a, b, out, count),
+            {
+                "BLOCK": args.block,
+                "mode": op["mode"],
+                "num_warps": 1,
+            },
+        ).replace("binary_kernel", f"binary_{index}_kernel")
+        ptx_by_key[f"binary_{index}"] = ptx
+
+    for index, op in enumerate(layer_norms):
+        n = op["normalized_size"]
+        count = _numel(op["shape"])
+        x = torch.randn(count, device="cuda", dtype=torch.float32)
+        weight = torch.randn(n, device="cuda", dtype=torch.float32)
+        bias = torch.randn(n, device="cuda", dtype=torch.float32)
+        out = torch.empty(count, device="cuda", dtype=torch.float32)
+        ptx = _compile_kernel(
+            layernorm_kernel,
+            (count,),
+            (x, weight, bias, out),
+            {"N": n, "eps": op["eps"], "num_warps": 1},
+        ).replace("layernorm_kernel", f"layernorm_{index}_kernel")
+        ptx_by_key[f"layernorm_{index}"] = ptx
+
+    for index, op in enumerate(softmaxes):
+        n = op["normalized_size"]
+        count = _numel(op["shape"])
+        x = torch.randn(count, device="cuda", dtype=torch.float32)
+        out = torch.empty(count, device="cuda", dtype=torch.float32)
+        ptx = _compile_kernel(
+            softmax_kernel,
+            (count,),
+            (x, out),
+            {"N": n, "num_warps": 1},
+        ).replace("softmax_kernel", f"softmax_{index}_kernel")
+        ptx_by_key[f"softmax_{index}"] = ptx
+
     output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_text(
         _generate_cpp(
@@ -1021,6 +1235,9 @@ def generate_native_runner(args: argparse.Namespace, output_path: pathlib.Path) 
             max_pools,
             avg_pools,
             adaptive_avg_pools,
+            binaries,
+            layer_norms,
+            softmaxes,
             weighted,
             shapes,
             ptx_by_key,
@@ -1041,6 +1258,9 @@ def _generate_cpp(
     max_pools,
     avg_pools,
     adaptive_avg_pools,
+    binaries,
+    layer_norms,
+    softmaxes,
     weighted,
     shapes,
     ptx_by_key,
@@ -1081,6 +1301,15 @@ def _generate_cpp(
             f"""  CUfunction adaptive_avgpool{index}_fn = load_function(
       R"CUPTX({ptx_by_key[f"adaptive_avgpool2d_{index}"]})CUPTX", "adaptive_avgpool2d_{index}_kernel");"""
         )
+    for index, _ in enumerate(binaries):
+        function_loads.append(f"""  CUfunction binary{index}_fn = load_function(
+      R"CUPTX({ptx_by_key[f"binary_{index}"]})CUPTX", "binary_{index}_kernel");""")
+    for index, _ in enumerate(layer_norms):
+        function_loads.append(f"""  CUfunction layernorm{index}_fn = load_function(
+      R"CUPTX({ptx_by_key[f"layernorm_{index}"]})CUPTX", "layernorm_{index}_kernel");""")
+    for index, _ in enumerate(softmaxes):
+        function_loads.append(f"""  CUfunction softmax{index}_fn = load_function(
+      R"CUPTX({ptx_by_key[f"softmax_{index}"]})CUPTX", "softmax_{index}_kernel");""")
     declarations = "\n".join(function_loads)
     check_functions = (
         " || ".join(
@@ -1093,6 +1322,9 @@ def _generate_cpp(
             + [f"!maxpool{index}_fn" for index in range(len(max_pools))]
             + [f"!avgpool{index}_fn" for index in range(len(avg_pools))]
             + [f"!adaptive_avgpool{index}_fn" for index in range(len(adaptive_avg_pools))]
+            + [f"!binary{index}_fn" for index in range(len(binaries))]
+            + [f"!layernorm{index}_fn" for index in range(len(layer_norms))]
+            + [f"!softmax{index}_fn" for index in range(len(softmaxes))]
         )
         or "false"
     )
@@ -1107,6 +1339,9 @@ def _generate_cpp(
   std::string bn_bias{index}_path;
   std::string bn_mean{index}_path;
   std::string bn_var{index}_path;""" for index in range(len(batch_norms)))
+        + "\n"
+        + "\n".join(f"""  std::string ln_weight{index}_path;
+  std::string ln_bias{index}_path;""" for index in range(len(layer_norms)))
     )
 
     weight_arg_branches = []
@@ -1125,7 +1360,13 @@ def _generate_cpp(
       bn_mean{index}_path = argv[++i];
     }} else if (arg == "--bn-var{index}" && i + 1 < argc) {{
       bn_var{index}_path = argv[++i];""")
-    arg_parser = "\n".join(weight_arg_branches + bn_arg_branches)
+    ln_arg_branches = []
+    for index, _ in enumerate(layer_norms):
+        ln_arg_branches.append(f"""    }} else if (arg == "--ln-weight{index}" && i + 1 < argc) {{
+      ln_weight{index}_path = argv[++i];
+    }} else if (arg == "--ln-bias{index}" && i + 1 < argc) {{
+      ln_bias{index}_path = argv[++i];""")
+    arg_parser = "\n".join(weight_arg_branches + bn_arg_branches + ln_arg_branches)
 
     weight_reads = []
     for index, op in enumerate(weighted):
@@ -1156,6 +1397,16 @@ def _generate_cpp(
     return 3;
   }}""")
 
+    ln_reads = []
+    for index, op in enumerate(layer_norms):
+        count = op["normalized_size"]
+        ln_reads.append(f"""  const auto ln_weight{index} = read_floats(ln_weight{index}_path);
+  const auto ln_bias{index} = read_floats(ln_bias{index}_path);
+  if (static_cast<int>(ln_weight{index}.size()) != {count} ||
+      static_cast<int>(ln_bias{index}.size()) != {count}) {{
+    return 3;
+  }}""")
+
     device_weight_allocs = "\n".join(
         f"""  CUdeviceptr d_weight{index} =
       allocate_and_copy(weight{index}.data(),
@@ -1179,6 +1430,15 @@ def _generate_cpp(
                         bn_var{index}.size() * sizeof(float));"""
         for index in range(len(batch_norms))
     )
+    device_ln_allocs = "\n".join(
+        f"""  CUdeviceptr d_ln_weight{index} =
+      allocate_and_copy(ln_weight{index}.data(),
+                        ln_weight{index}.size() * sizeof(float));
+  CUdeviceptr d_ln_bias{index} =
+      allocate_and_copy(ln_bias{index}.data(),
+                        ln_bias{index}.size() * sizeof(float));"""
+        for index in range(len(layer_norms))
+    )
     alloc_guard_parts = ["!d_input"]
     alloc_guard_parts.extend(f"!d_weight{index}" for index in range(len(weighted)))
     alloc_guard_parts.extend(f"!d_bias{index}" for index in range(len(weighted)))
@@ -1186,6 +1446,8 @@ def _generate_cpp(
     alloc_guard_parts.extend(f"!d_bn_bias{index}" for index in range(len(batch_norms)))
     alloc_guard_parts.extend(f"!d_bn_mean{index}" for index in range(len(batch_norms)))
     alloc_guard_parts.extend(f"!d_bn_var{index}" for index in range(len(batch_norms)))
+    alloc_guard_parts.extend(f"!d_ln_weight{index}" for index in range(len(layer_norms)))
+    alloc_guard_parts.extend(f"!d_ln_bias{index}" for index in range(len(layer_norms)))
     alloc_guard = " ||\n      ".join(alloc_guard_parts)
 
     buffer_allocs = []
@@ -1198,8 +1460,19 @@ def _generate_cpp(
 
     launches = []
     for op in program:
-        input_var = "d_input" if op["input"] == placeholder.name else _buffer_name(op["input"])
         output_var = _buffer_name(op["name"])
+        if op["kind"] == "binary":
+            binary_index = _binary_index(binaries, op)
+            left_name, right_name = op["inputs"]
+            left_var = "d_input" if left_name == placeholder.name else _buffer_name(left_name)
+            right_var = "d_input" if right_name == placeholder.name else _buffer_name(right_name)
+            count = _numel(op["shape"])
+            launches.append(f"""  if (!launch_binary(binary{binary_index}_fn, {left_var},
+                       {right_var}, {output_var}, {count}, {args.block})) {{
+    return 16;
+  }}""")
+            continue
+        input_var = "d_input" if op["input"] == placeholder.name else _buffer_name(op["input"])
         if op["kind"] == "linear":
             linear_index = _linear_index(linears, op)
             weight_index = _weighted_index(weighted, op)
@@ -1280,6 +1553,21 @@ def _generate_cpp(
             launches.append(f"""  if (!launch_elementwise(copy{index}_fn, {input_var},
                           {output_var}, {count}, {args.block})) {{
     return 15;
+  }}""")
+        elif op["kind"] == "layernorm":
+            layer_norm_index = _layer_norm_index(layer_norms, op)
+            count = _numel(op["shape"])
+            launches.append(f"""  if (!launch_layernorm(layernorm{layer_norm_index}_fn, {input_var},
+                         d_ln_weight{layer_norm_index}, d_ln_bias{layer_norm_index},
+                         {output_var}, {count})) {{
+    return 17;
+  }}""")
+        elif op["kind"] == "softmax":
+            softmax_index = _softmax_index(softmaxes, op)
+            count = _numel(op["shape"])
+            launches.append(f"""  if (!launch_softmax(softmax{softmax_index}_fn, {input_var},
+                       {output_var}, {count})) {{
+    return 18;
   }}""")
         else:
             raise RuntimeError(f"unsupported program operation: {op['kind']}")
@@ -1363,6 +1651,35 @@ def _generate_cpp(
   void *params[] = {&x, &out, &scratch};
   return check(cuLaunchKernel(function,
                               static_cast<unsigned int>(batch_channels), 1, 1,
+                              32, 1, 1, 0, nullptr, params, nullptr));
+}""")
+    if binaries:
+        launch_helpers.append("""bool launch_binary(CUfunction function, CUdeviceptr x,
+                   CUdeviceptr y, CUdeviceptr out, int count, int block) {
+  CUdeviceptr scratch = 0;
+  void *params[] = {&x, &y, &out, &count, &scratch};
+  const unsigned int grid =
+      (static_cast<unsigned int>(count) + static_cast<unsigned int>(block) - 1) /
+      static_cast<unsigned int>(block);
+  return check(cuLaunchKernel(function, grid, 1, 1,
+                              static_cast<unsigned int>(block), 1, 1, 0,
+                              nullptr, params, nullptr));
+}""")
+    if layer_norms:
+        launch_helpers.append("""bool launch_layernorm(CUfunction function, CUdeviceptr x,
+                       CUdeviceptr weight, CUdeviceptr bias, CUdeviceptr out,
+                       int count) {
+  CUdeviceptr scratch = 0;
+  void *params[] = {&x, &weight, &bias, &out, &scratch};
+  return check(cuLaunchKernel(function, static_cast<unsigned int>(count), 1, 1,
+                              32, 1, 1, 0, nullptr, params, nullptr));
+}""")
+    if softmaxes:
+        launch_helpers.append("""bool launch_softmax(CUfunction function, CUdeviceptr x,
+                    CUdeviceptr out, int count) {
+  CUdeviceptr scratch = 0;
+  void *params[] = {&x, &out, &scratch};
+  return check(cuLaunchKernel(function, static_cast<unsigned int>(count), 1, 1,
                               32, 1, 1, 0, nullptr, params, nullptr));
 }""")
     launch_helpers_text = "\n".join(launch_helpers)
@@ -1466,6 +1783,7 @@ int main(int argc, char **argv) {{
 
 {chr(10).join(weight_reads)}
 {chr(10).join(bn_reads)}
+{chr(10).join(ln_reads)}
 
 {declarations}
   if ({check_functions}) {{
@@ -1475,6 +1793,7 @@ int main(int argc, char **argv) {{
   CUdeviceptr d_input = allocate_and_copy(input.data(), input.size() * sizeof(float));
 {device_weight_allocs}
 {device_bn_allocs}
+{device_ln_allocs}
   if ({alloc_guard}) {{
     return 5;
   }}

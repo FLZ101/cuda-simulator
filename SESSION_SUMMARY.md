@@ -27,8 +27,9 @@ never takes PTX text as input.
 The traced-module spec currently lowers `nn.Linear`, `nn.Conv2d`, `nn.ReLU`,
 `nn.BatchNorm2d`, `nn.MaxPool2d`, `nn.AvgPool2d`, `nn.AdaptiveAvgPool2d`,
 `nn.GELU`, `nn.SiLU`, `nn.Sigmoid`, `nn.Tanh`, `nn.LeakyReLU`, `nn.Flatten`,
-`nn.Dropout`, and `nn.Identity`. ResNet-stem and CNN-ops fixtures cover the
-generated execution paths.
+`nn.Dropout`, `nn.Identity`, `nn.LayerNorm`, last-dim `nn.Softmax`, and
+graph-level `operator.add` / `operator.mul` binaries. ResNet-stem, CNN-ops,
+and LLM-ops fixtures cover the generated execution paths.
 
 Build:
 
@@ -167,6 +168,7 @@ bank, so generated indices such as `r716` do not alias `rd` or `f` registers.
 - `tests/models/fixtures/conv_module.py`
 - `tests/models/fixtures/resnet_stem.py`
 - `tests/models/fixtures/cnn_ops.py`
+- `tests/models/fixtures/llm_ops.py`
 - `tests/ptx/scalar_math_kernel.ptx`
 - `tests/ptx/scalar_math_exec_smoke.cpp`
 - `tests/CMakeLists.txt`

@@ -954,6 +954,65 @@ add_test(
           --output-dir ${CMAKE_CURRENT_BINARY_DIR}/models/cnn_ops
 )
 
+set(LLM_OPS_RUNNER_SRC ${GENERATED_MODEL_DIR}/llm_ops_runner.cu)
+set(LLM_OPS_MODEL_FIXTURE
+  ${CMAKE_CURRENT_SOURCE_DIR}/models/fixtures/llm_ops.py)
+
+add_custom_command(
+  OUTPUT ${LLM_OPS_RUNNER_SRC}
+  COMMAND ${SIM_PYTHON} ${CMAKE_CURRENT_SOURCE_DIR}/models/generate_model_runner.py
+          --spec module
+          --output-cpp ${LLM_OPS_RUNNER_SRC}
+          --module-file ${LLM_OPS_MODEL_FIXTURE}
+          --batch 4
+          --in-features 8
+          --block 32
+  DEPENDS
+    ${CMAKE_CURRENT_SOURCE_DIR}/models/generate_model_runner.py
+    ${CMAKE_CURRENT_SOURCE_DIR}/models/specs/module.py
+    ${LLM_OPS_MODEL_FIXTURE}
+  VERBATIM
+)
+
+add_executable(llm_ops_model_runner ${LLM_OPS_RUNNER_SRC})
+set_target_properties(llm_ops_model_runner PROPERTIES
+  CUDA_STANDARD 20
+  CUDA_STANDARD_REQUIRED ON
+  CUDA_ARCHITECTURES 86
+)
+target_link_libraries(llm_ops_model_runner PRIVATE CUDA::cuda_driver)
+
+add_test(
+  NAME models.llm_ops.runner_cpu
+  COMMAND ${SIM_PYTHON} ${CMAKE_CURRENT_SOURCE_DIR}/models/model_runner.py
+          --spec module
+          --mode cpu
+          --module-file ${LLM_OPS_MODEL_FIXTURE}
+          --batch 4
+          --in-features 8
+          --runner $<TARGET_FILE:llm_ops_model_runner>
+          --cudart $<TARGET_FILE:cudart_shim>
+          --cuda $<TARGET_FILE:cuda_shim>
+          --core-dir $<TARGET_FILE_DIR:cudasim_core>
+          --output-dir ${CMAKE_CURRENT_BINARY_DIR}/models/llm_ops
+)
+add_test(
+  NAME models.llm_ops.runner_sim
+  COMMAND ${SIM_PYTHON} ${CMAKE_CURRENT_SOURCE_DIR}/models/model_runner.py
+          --spec module
+          --mode gpu
+          --simulate
+          --compare
+          --module-file ${LLM_OPS_MODEL_FIXTURE}
+          --batch 4
+          --in-features 8
+          --runner $<TARGET_FILE:llm_ops_model_runner>
+          --cudart $<TARGET_FILE:cudart_shim>
+          --cuda $<TARGET_FILE:cuda_shim>
+          --core-dir $<TARGET_FILE_DIR:cudasim_core>
+          --output-dir ${CMAKE_CURRENT_BINARY_DIR}/models/llm_ops
+)
+
 add_executable(runtime_api_smoke
   compat/runtime_api_smoke.cpp
 )

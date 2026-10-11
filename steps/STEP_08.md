@@ -39,6 +39,7 @@ tests/models/fixtures/mlp_module.py
 tests/models/fixtures/conv_module.py
 tests/models/fixtures/resnet_stem.py
 tests/models/fixtures/cnn_ops.py
+tests/models/fixtures/llm_ops.py
 tests/ptx/scalar_math_kernel.ptx
 tests/ptx/scalar_math_exec_smoke.cpp
 ```
@@ -565,6 +566,16 @@ Comparison requirements:
 - verification: `models.cnn_ops.runner_cpu`, `models.cnn_ops.runner_sim`,
   all traced-module model tests, and the full 43-test CTest suite pass.
 
+- Extended the traced-module runner with LLM residual-path operators:
+  `nn.LayerNorm`, last-dim `nn.Softmax`, and graph-level `operator.add` /
+  `operator.mul` binaries. A new `llm_ops.py` fixture chains
+  `LayerNorm -> Linear -> GELU -> add residual -> multiply residual ->
+  Softmax`.
+- files: `tests/models/specs/module.py`,
+  `tests/models/fixtures/llm_ops.py`, `tests/CMakeLists.txt`
+- verification: `models.llm_ops.runner_cpu`, `models.llm_ops.runner_sim`,
+  all traced-module model tests, and the full 45-test CTest suite pass.
+
 ## Verification
 
 Commands run:
@@ -573,14 +584,14 @@ Commands run:
 cmake --build build -j 4
 ctest --test-dir build -R kernels.gpu_reference_differential_detection --output-on-failure
 ctest --test-dir build -R kernels.gpu_reference_differential_sequence --output-on-failure
-ctest --test-dir build -R 'models\.(vector_add|matmul|mlp|module|conv_module|resnet_stem|cnn_ops)\.runner_(cpu|sim)' --output-on-failure
+ctest --test-dir build -R 'models\.(vector_add|matmul|mlp|module|conv_module|resnet_stem|cnn_ops|llm_ops)\.runner_(cpu|sim)' --output-on-failure
 ctest --test-dir build --output-on-failure
 ```
 
 Result:
 
 ```text
-100% tests passed, 0 tests failed out of 43
+100% tests passed, 0 tests failed out of 45
 ```
 
 Required before Step 9:
