@@ -490,7 +490,8 @@ bool execute_instruction(
   }
 
   if (opcode == "ld.param.u64" || opcode == "ld.param.u32" ||
-      opcode == "ld.param.f32") {
+      opcode == "ld.param.f32" || opcode == "ld.param.b64" ||
+      opcode == "ld.param.b32") {
     std::size_t pos = 0;
     auto dst = parse_register(instruction.operand_tokens, pos);
     if (!dst || pos >= instruction.operand_tokens.size()) {
