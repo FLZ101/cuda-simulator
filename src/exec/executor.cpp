@@ -91,11 +91,14 @@ parse_register(const std::vector<cudasim::ptx::Token> &tokens,
   RegisterRef ref;
   std::size_t base = 0;
   // Keep r/rd/f register banks separated so large r-register indices such as
-  // r65 do not alias rd1 or f1.
+  // r716 do not alias rd1 or f1.
   if (bank == 'd') {
-    base = 256;
+    base = kRegisterDBankBase;
   } else if (bank == 'f') {
-    base = 512;
+    base = kRegisterFBankBase;
+  }
+  if (index >= kRegisterBankSize) {
+    return std::nullopt;
   }
   ref.index = base + index;
   ref.size = (bank == 'd' || bank == 'f') ? 8 : 4;
