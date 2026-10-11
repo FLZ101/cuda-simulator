@@ -545,8 +545,11 @@ bool execute_instruction(
     if (pos < instruction.operand_tokens.size() &&
         instruction.operand_tokens[pos].kind ==
             cudasim::ptx::TokenKind::Number) {
+      const std::string text = instruction.operand_tokens[pos].text;
       const auto value = static_cast<std::uint32_t>(
-          std::stoul(instruction.operand_tokens[pos].text));
+          text.size() == 10 && text[0] == '0' && text[1] == 'f'
+              ? std::stoul(text.substr(2), nullptr, 16)
+              : std::stoul(text, nullptr, 0));
       registers.values[dst->index][lane] =
           negative_immediate
               ? static_cast<std::uint32_t>(-static_cast<std::int32_t>(value))
@@ -609,6 +612,41 @@ bool execute_instruction(
     const auto bv = static_cast<std::int32_t>(*b);
     const auto cv = static_cast<std::int32_t>(*c);
     const auto result = static_cast<std::uint32_t>(av * bv + cv);
+    registers.values[dst->index][lane] = result;
+    next_pc = pc + 1;
+    return true;
+  }
+
+  if (opcode == "bfe.s32" || opcode == "bfe.u32") {
+    std::size_t pos = 0;
+    auto dst = parse_register(instruction.operand_tokens, pos);
+    auto a =
+        parse_u32_operand(instruction.operand_tokens, pos, registers, lane);
+    auto b =
+        parse_u32_operand(instruction.operand_tokens, pos, registers, lane);
+    auto c =
+        parse_u32_operand(instruction.operand_tokens, pos, registers, lane);
+    if (!dst || !a || !b || !c) {
+      return false;
+    }
+    const std::uint32_t src = *a;
+    const std::uint32_t bit = *b & 31U;
+    const std::uint32_t width = *c;
+    std::uint32_t result = 0;
+    if (width > 0) {
+      if (width >= 32) {
+        result = opcode == "bfe.s32"
+                     ? static_cast<std::uint32_t>(
+                           static_cast<std::int32_t>(src) >> bit)
+                     : src >> bit;
+      } else {
+        const std::uint32_t mask = (1U << width) - 1U;
+        result = (src >> bit) & mask;
+        if (opcode == "bfe.s32" && (result & (1U << (width - 1))) != 0) {
+          result |= ~mask;
+        }
+      }
+    }
     registers.values[dst->index][lane] = result;
     next_pc = pc + 1;
     return true;
