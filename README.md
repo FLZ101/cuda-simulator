@@ -23,6 +23,30 @@ Additional documentation:
 - clang-format
 - optional LLVM development package when `CUDA_SIM_ENABLE_JIT=ON`
 
+## Tested environment
+
+The repository is developed and validated against this environment:
+
+| Component | Version |
+| --- | --- |
+| OS | Ubuntu 26.04 LTS (x86-64) |
+| CUDA toolkit (`nvcc`) | 13.3 (V13.3.73) |
+| NVIDIA driver | 615.71.09 (GeForce RTX 3050 Ti, `sm_86`) |
+| Python | 3.14 |
+| PyTorch | 2.14.1+cu130 |
+| Triton | 3.8.0 |
+| NumPy | 2.5.4 |
+| Build tools | CMake 3.24+, Ninja, clang-format |
+
+`make venv` installs the PyTorch, Triton, and NumPy versions above from the
+PyTorch CUDA 13 wheel index.
+
+This is not the only supported environment: the full test suite also passes on
+a CUDA 12 toolchain (older `nvcc` and Triton). Because `nvcc` and Triton change
+their PTX output and kernel ABI between toolchain versions, the interpreter is
+validated against both, and missing instruction variants are added as they
+appear.
+
 ## Build
 
 ```bash

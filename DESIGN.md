@@ -41,7 +41,8 @@ Host assumptions:
 - x86-64 first, aarch64 allowed.
 - LP64 host data model.
 - C++20.
-- PTX ISA 7.x and 8.x.
+- PTX ISA 7.x through 9.x (the CUDA 13 `nvcc` path currently emits `.version
+  9.3` for `sm_80`, and Triton 3.8 emits `.version 8.8` for `sm_86`).
 - Generated targets: `sm_70`, `sm_75`, `sm_80`, or `sm_86`, with PTX embedded.
 - CUDA toolkit or another external generator is required to produce the CUDA
   programs under test. It is a generation dependency, not a simulator runtime
