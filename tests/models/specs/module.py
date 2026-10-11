@@ -2022,7 +2022,8 @@ def _generate_cpp(
             """bool launch_linear(CUfunction function, CUdeviceptr x, CUdeviceptr w,
                    CUdeviceptr b, CUdeviceptr out, int m, int n) {
   CUdeviceptr scratch = 0;
-  void *params[] = {&x, &w, &b, &out, &m, &n, &scratch};
+  CUdeviceptr profile_scratch = 0;
+  void *params[] = {&x, &w, &b, &out, &m, &n, &scratch, &profile_scratch};
   return check(cuLaunchKernel(function, static_cast<unsigned int>(m),
                               static_cast<unsigned int>(n), 1, 32, 1, 1, 0,
                               nullptr, params, nullptr));
@@ -2033,7 +2034,8 @@ def _generate_cpp(
                  CUdeviceptr b, CUdeviceptr out, int n, int k, int out_h,
                  int out_w) {
   CUdeviceptr scratch = 0;
-  void *params[] = {&x, &w, &b, &out, &scratch};
+  CUdeviceptr profile_scratch = 0;
+  void *params[] = {&x, &w, &b, &out, &scratch, &profile_scratch};
   return check(cuLaunchKernel(function, static_cast<unsigned int>(n * k),
                               static_cast<unsigned int>(out_h),
                               static_cast<unsigned int>(out_w), 32, 1, 1, 0,
@@ -2043,7 +2045,8 @@ def _generate_cpp(
         launch_helpers.append("""bool launch_elementwise(CUfunction function, CUdeviceptr x,
                         CUdeviceptr out, int count, int block) {
   CUdeviceptr scratch = 0;
-  void *params[] = {&x, &out, &count, &scratch};
+  CUdeviceptr profile_scratch = 0;
+  void *params[] = {&x, &out, &count, &scratch, &profile_scratch};
   const unsigned int grid =
       (static_cast<unsigned int>(count) + static_cast<unsigned int>(block) - 1) /
       static_cast<unsigned int>(block);
@@ -2056,7 +2059,8 @@ def _generate_cpp(
                        CUdeviceptr weight, CUdeviceptr bias, CUdeviceptr mean,
                        CUdeviceptr var, CUdeviceptr out, int count) {
   CUdeviceptr scratch = 0;
-  void *params[] = {&x, &weight, &bias, &mean, &var, &out, &scratch};
+  CUdeviceptr profile_scratch = 0;
+  void *params[] = {&x, &weight, &bias, &mean, &var, &out, &scratch, &profile_scratch};
   return check(cuLaunchKernel(function, static_cast<unsigned int>(count), 1, 1,
                               32, 1, 1, 0, nullptr, params, nullptr));
 }""")
@@ -2065,7 +2069,8 @@ def _generate_cpp(
                     CUdeviceptr out, int batch_channels, int out_h,
                     int out_w) {
   CUdeviceptr scratch = 0;
-  void *params[] = {&x, &out, &scratch};
+  CUdeviceptr profile_scratch = 0;
+  void *params[] = {&x, &out, &scratch, &profile_scratch};
   return check(cuLaunchKernel(function,
                               static_cast<unsigned int>(batch_channels),
                               static_cast<unsigned int>(out_h),
@@ -2077,7 +2082,8 @@ def _generate_cpp(
                    CUdeviceptr out, int batch_channels, int out_h,
                    int out_w) {
   CUdeviceptr scratch = 0;
-  void *params[] = {&x, &out, &scratch};
+  CUdeviceptr profile_scratch = 0;
+  void *params[] = {&x, &out, &scratch, &profile_scratch};
   return check(cuLaunchKernel(function,
                               static_cast<unsigned int>(batch_channels),
                               static_cast<unsigned int>(out_h),
@@ -2088,7 +2094,8 @@ def _generate_cpp(
         launch_helpers.append("""bool launch_adaptive_avgpool(CUfunction function, CUdeviceptr x,
                               CUdeviceptr out, int batch_channels) {
   CUdeviceptr scratch = 0;
-  void *params[] = {&x, &out, &scratch};
+  CUdeviceptr profile_scratch = 0;
+  void *params[] = {&x, &out, &scratch, &profile_scratch};
   return check(cuLaunchKernel(function,
                               static_cast<unsigned int>(batch_channels), 1, 1,
                               32, 1, 1, 0, nullptr, params, nullptr));
@@ -2097,7 +2104,8 @@ def _generate_cpp(
         launch_helpers.append("""bool launch_adaptive_maxpool(CUfunction function, CUdeviceptr x,
                               CUdeviceptr out, int batch_channels) {
   CUdeviceptr scratch = 0;
-  void *params[] = {&x, &out, &scratch};
+  CUdeviceptr profile_scratch = 0;
+  void *params[] = {&x, &out, &scratch, &profile_scratch};
   return check(cuLaunchKernel(function,
                               static_cast<unsigned int>(batch_channels), 1, 1,
                               32, 1, 1, 0, nullptr, params, nullptr));
@@ -2106,7 +2114,8 @@ def _generate_cpp(
         launch_helpers.append("""bool launch_binary(CUfunction function, CUdeviceptr x,
                    CUdeviceptr y, CUdeviceptr out, int count, int block) {
   CUdeviceptr scratch = 0;
-  void *params[] = {&x, &y, &out, &count, &scratch};
+  CUdeviceptr profile_scratch = 0;
+  void *params[] = {&x, &y, &out, &count, &scratch, &profile_scratch};
   const unsigned int grid =
       (static_cast<unsigned int>(count) + static_cast<unsigned int>(block) - 1) /
       static_cast<unsigned int>(block);
@@ -2118,7 +2127,8 @@ def _generate_cpp(
         launch_helpers.append("""bool launch_cat(CUfunction function, CUdeviceptr x,
                  CUdeviceptr y, CUdeviceptr out, int count, int block) {
   CUdeviceptr scratch = 0;
-  void *params[] = {&x, &y, &out, &count, &scratch};
+  CUdeviceptr profile_scratch = 0;
+  void *params[] = {&x, &y, &out, &count, &scratch, &profile_scratch};
   const unsigned int grid =
       (static_cast<unsigned int>(count) + static_cast<unsigned int>(block) - 1) /
       static_cast<unsigned int>(block);
@@ -2130,7 +2140,8 @@ def _generate_cpp(
         launch_helpers.append("""bool launch_transpose(CUfunction function, CUdeviceptr x,
                        CUdeviceptr out, int count, int block) {
   CUdeviceptr scratch = 0;
-  void *params[] = {&x, &out, &scratch};
+  CUdeviceptr profile_scratch = 0;
+  void *params[] = {&x, &out, &scratch, &profile_scratch};
   const unsigned int grid =
       (static_cast<unsigned int>(count) + static_cast<unsigned int>(block) - 1) /
       static_cast<unsigned int>(block);
@@ -2142,7 +2153,8 @@ def _generate_cpp(
         launch_helpers.append("""bool launch_matmul(CUfunction function, CUdeviceptr x,
                    CUdeviceptr y, CUdeviceptr out, int m, int n) {
   CUdeviceptr scratch = 0;
-  void *params[] = {&x, &y, &out, &scratch};
+  CUdeviceptr profile_scratch = 0;
+  void *params[] = {&x, &y, &out, &scratch, &profile_scratch};
   return check(cuLaunchKernel(function, static_cast<unsigned int>(m),
                               static_cast<unsigned int>(n), 1, 32, 1, 1, 0,
                               nullptr, params, nullptr));
@@ -2152,7 +2164,8 @@ def _generate_cpp(
                        CUdeviceptr weight, CUdeviceptr bias, CUdeviceptr out,
                        int count) {
   CUdeviceptr scratch = 0;
-  void *params[] = {&x, &weight, &bias, &out, &scratch};
+  CUdeviceptr profile_scratch = 0;
+  void *params[] = {&x, &weight, &bias, &out, &scratch, &profile_scratch};
   return check(cuLaunchKernel(function, static_cast<unsigned int>(count), 1, 1,
                               32, 1, 1, 0, nullptr, params, nullptr));
 }""")
@@ -2160,7 +2173,8 @@ def _generate_cpp(
         launch_helpers.append("""bool launch_softmax(CUfunction function, CUdeviceptr x,
                     CUdeviceptr out, int count) {
   CUdeviceptr scratch = 0;
-  void *params[] = {&x, &out, &scratch};
+  CUdeviceptr profile_scratch = 0;
+  void *params[] = {&x, &out, &scratch, &profile_scratch};
   return check(cuLaunchKernel(function, static_cast<unsigned int>(count), 1, 1,
                               32, 1, 1, 0, nullptr, params, nullptr));
 }""")

@@ -227,7 +227,8 @@ CUdeviceptr allocate_and_copy(const void *data, std::size_t bytes) {{
 bool launch_linear(CUfunction function, CUdeviceptr x, CUdeviceptr w,
                    CUdeviceptr b, CUdeviceptr out, int m, int n) {{
   CUdeviceptr scratch = 0;
-  void *params[] = {{&x, &w, &b, &out, &m, &n, &scratch}};
+  CUdeviceptr profile_scratch = 0;
+  void *params[] = {{&x, &w, &b, &out, &m, &n, &scratch, &profile_scratch}};
   return check(cuLaunchKernel(function, static_cast<unsigned int>(m),
                               static_cast<unsigned int>(n), 1, 32, 1, 1, 0,
                               nullptr, params, nullptr));
@@ -336,8 +337,9 @@ int main(int argc, char **argv) {{
   }}
 
   CUdeviceptr scratch = 0;
+  CUdeviceptr profile_scratch = 0;
   int act_count = batch * hidden;
-  void *relu_params[] = {{&d_mid, &d_act, &act_count, &scratch}};
+  void *relu_params[] = {{&d_mid, &d_act, &act_count, &scratch, &profile_scratch}};
   const unsigned int relu_grid =
       (static_cast<unsigned int>(act_count) + {args.block} - 1) /
       {args.block};

@@ -228,7 +228,8 @@ int main(int argc, char **argv) {{
   }}
 
   CUdeviceptr scratch = 0;
-  void *params[] = {{&d_a, &d_b, &d_out, &m, &n, &scratch}};
+  CUdeviceptr profile_scratch = 0;
+  void *params[] = {{&d_a, &d_b, &d_out, &m, &n, &scratch, &profile_scratch}};
   if (!check(cuLaunchKernel(function, static_cast<unsigned int>(m),
                             static_cast<unsigned int>(n), 1, 32, 1, 1, 0,
                             nullptr, params, nullptr))) {{

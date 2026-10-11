@@ -211,7 +211,8 @@ int main(int argc, char **argv) {{
   }}
 
   CUdeviceptr scratch = 0;
-  void *params[] = {{&d_a, &d_b, &d_out, &n, &scratch}};
+  CUdeviceptr profile_scratch = 0;
+  void *params[] = {{&d_a, &d_b, &d_out, &n, &scratch, &profile_scratch}};
   constexpr unsigned int block = {args.block};
   const unsigned int grid = (static_cast<unsigned int>(n) + block - 1) / block;
   if (!check(cuLaunchKernel(function, grid, 1, 1, block, 1, 1, 0, nullptr,
