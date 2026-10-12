@@ -29,17 +29,15 @@ CMAKE_FLAGS := \
 
 all: build
 
-venv:
-	@if [ -f "$(VENV_MARKER)" ]; then \
-		true ; \
-	else \
-		$(PYTHON) -m venv $(VENV); \
-		$(VENV_PIP) install --upgrade pip; \
-		$(VENV_PIP) install "torch==$(TORCH_VERSION)" "triton==$(TRITON_VERSION)" --index-url $(PYTORCH_INDEX_URL); \
-		$(VENV_PIP) install -r requirements-dev.txt; \
-		$(VENV_PRE_COMMIT) install; \
-		touch "$(VENV_MARKER)"; \
-	fi
+$(VENV_MARKER):
+	$(PYTHON) -m venv $(VENV)
+	$(VENV_PIP) install --upgrade pip
+	$(VENV_PIP) install "torch==$(TORCH_VERSION)" "triton==$(TRITON_VERSION)" --index-url $(PYTORCH_INDEX_URL)
+	$(VENV_PIP) install -r requirements-dev.txt
+	$(VENV_PRE_COMMIT) install
+	touch "$(VENV_MARKER)"
+
+venv: $(VENV_MARKER)
 
 precommit: venv
 	$(VENV_PRE_COMMIT) run --all-files
