@@ -410,9 +410,60 @@ def causal_softmax_kernel(
     tl.store(out_ptr + pid, result)
 
 
+@triton.jit
+def multihead_attention_kernel(
+    q_ptr,
+    k_ptr,
+    v_ptr,
+    out_ptr,
+    C: tl.constexpr,
+    H: tl.constexpr,
+    T: tl.constexpr,
+    scale: tl.constexpr,
+):
+    pid = tl.program_id(0)
+    row = pid // C
+    out_col = pid % C
+    head = out_col // H
+    dim = out_col % H
+
+    max_value = float("-inf")
+    for j in tl.range(0, T):
+        score = 0.0
+        for hh in tl.range(0, H):
+            q_value = tl.load(q_ptr + row * C + head * H + hh)
+            k_value = tl.load(k_ptr + j * C + head * H + hh)
+            score += q_value * k_value
+        score = score * scale
+        max_value = tl.maximum(max_value, tl.where(j <= row, score, float("-inf")))
+
+    denominator = 0.0
+    for j in tl.range(0, T):
+        score = 0.0
+        for hh in tl.range(0, H):
+            q_value = tl.load(q_ptr + row * C + head * H + hh)
+            k_value = tl.load(k_ptr + j * C + head * H + hh)
+            score += q_value * k_value
+        score = score * scale
+        denominator += tl.where(j <= row, tl.exp(score - max_value), 0.0)
+
+    result = 0.0
+    for j in tl.range(0, T):
+        score = 0.0
+        for hh in tl.range(0, H):
+            q_value = tl.load(q_ptr + row * C + head * H + hh)
+            k_value = tl.load(k_ptr + j * C + head * H + hh)
+            score += q_value * k_value
+        score = score * scale
+        weight = tl.where(j <= row, tl.exp(score - max_value) / denominator, 0.0)
+        result += weight * tl.load(v_ptr + j * C + head * H + dim)
+    tl.store(out_ptr + pid, result)
+
+
 def add_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--module-file", required=True)
     parser.add_argument("--head-dim", type=int, default=16)
+    parser.add_argument("--num-heads", type=int, default=2)
     parser.add_argument("--seq-len", type=int, default=8)
     parser.add_argument("--vocab-size", type=int, default=32)
     parser.add_argument("--embedding-dim", type=int, default=16)
@@ -588,6 +639,12 @@ def _softmax_nodes(traced):
 
 def _causal_softmax_target(node):
     return node.op == "call_function" and getattr(node.target, "__name__", "") == "causal_softmax"
+
+
+def _multihead_attention_target(node):
+    return (
+        node.op == "call_function" and getattr(node.target, "__name__", "") == "multihead_attention"
+    )
 
 
 def _activation_mode(module):
@@ -861,6 +918,26 @@ def _shape_map(traced, example_input):
                 shapes[node.name] = input_shape
             else:
                 raise RuntimeError(f"unsupported module in traced graph: {type(module).__name__}")
+        elif _multihead_attention_target(node):
+            if len(node.args) < 5:
+                raise RuntimeError(
+                    "multihead_attention requires query/key/value/num_heads/head_dim"
+                )
+            query_name, key_name, value_name, num_heads, head_dim = node.args[:5]
+            if not all(
+                isinstance(value, torch.fx.Node) for value in (query_name, key_name, value_name)
+            ):
+                raise RuntimeError("multihead_attention inputs must be tensors")
+            query_shape = shapes[query_name.name]
+            if len(query_shape) != 2:
+                raise RuntimeError("multihead_attention requires 2D query input")
+            if shapes[key_name.name] != query_shape or shapes[value_name.name] != query_shape:
+                raise RuntimeError("multihead_attention Q/K/V shapes must match")
+            if not isinstance(num_heads, int) or not isinstance(head_dim, int):
+                raise RuntimeError("multihead_attention num_heads/head_dim must be static")
+            if num_heads * head_dim != query_shape[1]:
+                raise RuntimeError("num_heads * head_dim must match the query feature size")
+            shapes[node.name] = query_shape
         elif _causal_softmax_target(node):
             input_name = _predecessor_name(node)
             if len(shapes[input_name]) != 2:
@@ -966,6 +1043,21 @@ def _graph_program(traced, shapes):
                     "kind": "matmul",
                     "name": node.name,
                     "inputs": (left_name, right_name),
+                    "shape": shapes[node.name],
+                }
+            )
+            continue
+        if _multihead_attention_target(node):
+            query_name, key_name, value_name, num_heads, head_dim = node.args[:5]
+            program.append(
+                {
+                    "kind": "multihead_attention",
+                    "name": node.name,
+                    "inputs": (query_name.name, key_name.name, value_name.name),
+                    "input_shape": shapes[query_name.name],
+                    "num_heads": num_heads,
+                    "head_dim": head_dim,
+                    "scale": 1.0 / math.sqrt(head_dim),
                     "shape": shapes[node.name],
                 }
             )
@@ -1404,6 +1496,10 @@ def _causal_softmax_index(causal_softmaxes, op):
     return next(index for index, candidate in enumerate(causal_softmaxes) if candidate is op)
 
 
+def _multihead_attention_index(multihead_attentions, op):
+    return next(index for index, candidate in enumerate(multihead_attentions) if candidate is op)
+
+
 def _weighted_index(weighted_ops, op):
     return next(index for index, candidate in enumerate(weighted_ops) if candidate is op)
 
@@ -1438,6 +1534,7 @@ def generate_native_runner(args: argparse.Namespace, output_path: pathlib.Path) 
     layer_norms = [op for op in program if op["kind"] == "layernorm"]
     softmaxes = [op for op in program if op["kind"] == "softmax"]
     causal_softmaxes = [op for op in program if op["kind"] == "causal_softmax"]
+    multihead_attentions = [op for op in program if op["kind"] == "multihead_attention"]
     weighted = [op for op in program if op["kind"] in ("linear", "conv2d")]
 
     ptx_by_key = {}
@@ -1756,6 +1853,28 @@ def generate_native_runner(args: argparse.Namespace, output_path: pathlib.Path) 
         ).replace("causal_softmax_kernel", f"causal_softmax_{index}_kernel")
         ptx_by_key[f"causal_softmax_{index}"] = ptx
 
+    for index, op in enumerate(multihead_attentions):
+        sequence_length, channels = op["input_shape"]
+        head_dim = op["head_dim"]
+        count = sequence_length * channels
+        query = torch.randn(sequence_length, channels, device="cuda", dtype=torch.float32)
+        key = torch.randn(sequence_length, channels, device="cuda", dtype=torch.float32)
+        value = torch.randn(sequence_length, channels, device="cuda", dtype=torch.float32)
+        out = torch.empty(sequence_length, channels, device="cuda", dtype=torch.float32)
+        ptx = compile_kernel(
+            multihead_attention_kernel,
+            (count,),
+            (query, key, value, out),
+            {
+                "C": channels,
+                "H": head_dim,
+                "T": sequence_length,
+                "scale": op["scale"],
+                "num_warps": 1,
+            },
+        ).replace("multihead_attention_kernel", f"multihead_attention_{index}_kernel")
+        ptx_by_key[f"multihead_attention_{index}"] = ptx
+
     output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_text(
         _generate_cpp(
@@ -1780,6 +1899,7 @@ def generate_native_runner(args: argparse.Namespace, output_path: pathlib.Path) 
             layer_norms,
             softmaxes,
             causal_softmaxes,
+            multihead_attentions,
             weighted,
             shapes,
             ptx_by_key,
@@ -1809,6 +1929,7 @@ def _generate_cpp(
     layer_norms,
     softmaxes,
     causal_softmaxes,
+    multihead_attentions,
     weighted,
     shapes,
     ptx_by_key,
@@ -1878,6 +1999,11 @@ def _generate_cpp(
     for index, _ in enumerate(causal_softmaxes):
         function_loads.append(f"""  CUfunction causal_softmax{index}_fn = load_function(
       R"CUPTX({ptx_by_key[f"causal_softmax_{index}"]})CUPTX", "causal_softmax_{index}_kernel");""")
+    for index, _ in enumerate(multihead_attentions):
+        function_loads.append(
+            f"""  CUfunction multihead_attention{index}_fn = load_function(
+      R"CUPTX({ptx_by_key[f"multihead_attention_{index}"]})CUPTX", "multihead_attention_{index}_kernel");"""
+        )
     declarations = "\n".join(function_loads)
     check_functions = (
         " || ".join(
@@ -1899,6 +2025,7 @@ def _generate_cpp(
             + [f"!layernorm{index}_fn" for index in range(len(layer_norms))]
             + [f"!softmax{index}_fn" for index in range(len(softmaxes))]
             + [f"!causal_softmax{index}_fn" for index in range(len(causal_softmaxes))]
+            + [f"!multihead_attention{index}_fn" for index in range(len(multihead_attentions))]
         )
         or "false"
     )
@@ -2094,6 +2221,20 @@ def _generate_cpp(
                       {right_var}, {output_var}, {m}, {n})) {{
     return 21;
   }}""")
+            continue
+        if op["kind"] == "multihead_attention":
+            attention_index = _multihead_attention_index(multihead_attentions, op)
+            query_name, key_name, value_name = op["inputs"]
+            query_var = "d_input" if query_name == placeholder.name else _buffer_name(query_name)
+            key_var = "d_input" if key_name == placeholder.name else _buffer_name(key_name)
+            value_var = "d_input" if value_name == placeholder.name else _buffer_name(value_name)
+            count = _numel(op["shape"])
+            launches.append(
+                f"""  if (!launch_multihead_attention(multihead_attention{attention_index}_fn,
+                       {query_var}, {key_var}, {value_var}, {output_var}, {count})) {{
+    return 25;
+  }}"""
+            )
             continue
         input_var = "d_input" if op["input"] == placeholder.name else _buffer_name(op["input"])
         if op["kind"] == "linear":
@@ -2397,6 +2538,16 @@ def _generate_cpp(
   CUdeviceptr scratch = 0;
   CUdeviceptr profile_scratch = 0;
   void *params[] = {&x, &out, &scratch, &profile_scratch};
+  return check(cuLaunchKernel(function, static_cast<unsigned int>(count), 1, 1,
+                              32, 1, 1, 0, nullptr, params, nullptr));
+}""")
+    if multihead_attentions:
+        launch_helpers.append("""bool launch_multihead_attention(CUfunction function, CUdeviceptr q,
+                                 CUdeviceptr k, CUdeviceptr v, CUdeviceptr out,
+                                 int count) {
+  CUdeviceptr scratch = 0;
+  CUdeviceptr profile_scratch = 0;
+  void *params[] = {&q, &k, &v, &out, &scratch, &profile_scratch};
   return check(cuLaunchKernel(function, static_cast<unsigned int>(count), 1, 1,
                               32, 1, 1, 0, nullptr, params, nullptr));
 }""")

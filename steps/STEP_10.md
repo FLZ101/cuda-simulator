@@ -65,6 +65,7 @@ context_length = 1024
 steps/STEP_10.md
 tests/models/fixtures/gpt2_embedding.py
 tests/models/fixtures/gpt2_attention.py
+tests/models/fixtures/gpt2_multihead.py
 tests/models/fixtures/gpt2_block.py
 tests/models/fixtures/gpt2.py
 tests/models/gpt2_compare.py
@@ -139,13 +140,22 @@ Reference constraints:
 - verification: `cmake --build build -j` and
   `ctest --test-dir build -R 'models\.gpt2_attention\.runner_(cpu|sim)'
   --output-on-failure` both pass; all 14 traced model-runner tests pass.
+- Added a dedicated multi-head causal-attention kernel and fixture. The
+  converter recognizes wrapped `multihead_attention` calls and lowers them to
+  one SIMT kernel over Q/K/V, while Q/K/V/output projections remain regular
+  `Linear` nodes.
+- files: `tests/models/specs/module.py`, `tests/CMakeLists.txt`,
+  `tests/models/fixtures/gpt2_multihead.py`
+- verification: `cmake --build build -j` and
+  `ctest --test-dir build -R 'models\.gpt2_multihead\.runner_(cpu|sim)'
+  --output-on-failure` both pass; all 16 traced model-runner tests pass.
 
 ## Verification
 
-Checkpoints 1 and 2 pass:
+Checkpoints 1-3 pass:
 
 ```bash
-ctest --test-dir build -R 'models\.gpt2_(embedding|attention)\.runner_(cpu|sim)' --output-on-failure
+ctest --test-dir build -R 'models\.gpt2_(embedding|attention|multihead)\.runner_(cpu|sim)' --output-on-failure
 ```
 
 ## Status
