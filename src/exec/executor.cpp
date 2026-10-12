@@ -11,6 +11,7 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <cstdio>
 #include <cstring>
 #include <optional>
 #include <string>
@@ -77,6 +78,9 @@ parse_register(const std::vector<cudasim::ptx::Token> &tokens,
   if (name.size() >= 2 && name[0] == 'r' && name[1] == 'd') {
     bank = 'd';
     number_start = 2;
+  } else if (name.size() >= 2 && name[0] == 'r' && name[1] == 's') {
+    bank = 's';
+    number_start = 2;
   } else if (name.size() >= 2 && name[0] == 'f') {
     bank = 'f';
     number_start = 1;
@@ -100,12 +104,14 @@ parse_register(const std::vector<cudasim::ptx::Token> &tokens,
     base = kRegisterDBankBase;
   } else if (bank == 'f') {
     base = kRegisterFBankBase;
+  } else if (bank == 's') {
+    base = kRegisterSBankBase;
   }
   if (index >= kRegisterBankSize) {
     return std::nullopt;
   }
   ref.index = base + index;
-  ref.size = (bank == 'd' || bank == 'f') ? 8 : 4;
+  ref.size = (bank == 'd' || bank == 'f') ? 8 : (bank == 's' ? 2 : 4);
   if (pos < tokens.size() &&
       tokens[pos].kind == cudasim::ptx::TokenKind::RBrace) {
     ++pos;
@@ -448,7 +454,9 @@ bool coalesced_global_f32(const FlatInstruction &instruction,
   return true;
 }
 
-bool execute_instruction(
+enum class ExecStatus { Continue, Exit, Error };
+
+ExecStatus execute_instruction(
     const FlatInstruction &instruction, const LaunchConfig &config,
     const BlockInfo &block, RegisterFile &registers, std::size_t lane,
     std::size_t lane_in_block, const std::vector<std::uint8_t> &arguments,
@@ -462,11 +470,11 @@ bool execute_instruction(
   if (opcode == "bra" || opcode == "bra.uni") {
     if (!parse_predicate(instruction.predicate_tokens, registers, lane)) {
       next_pc = pc + 1;
-      return true;
+      return ExecStatus::Continue;
     }
     if (instruction.operand_tokens.empty()) {
       next_pc = pc + 1;
-      return true;
+      return ExecStatus::Continue;
     }
     if (instruction.operand_tokens[0].kind == cudasim::ptx::TokenKind::Dollar) {
       std::string label;
@@ -477,16 +485,16 @@ bool execute_instruction(
     } else {
       next_pc = pc + 1;
     }
-    return true;
+    return ExecStatus::Continue;
   }
 
   if (!parse_predicate(instruction.predicate_tokens, registers, lane)) {
     next_pc = pc + 1;
-    return true;
+    return ExecStatus::Continue;
   }
 
   if (opcode == "ret" || opcode == "exit") {
-    return false;
+    return ExecStatus::Exit;
   }
 
   if (opcode == "ld.param.u64" || opcode == "ld.param.u32" ||
@@ -495,7 +503,7 @@ bool execute_instruction(
     std::size_t pos = 0;
     auto dst = parse_register(instruction.operand_tokens, pos);
     if (!dst || pos >= instruction.operand_tokens.size()) {
-      return false;
+      return ExecStatus::Error;
     }
     while (pos < instruction.operand_tokens.size() &&
            instruction.operand_tokens[pos].kind !=
@@ -503,16 +511,16 @@ bool execute_instruction(
       ++pos;
     }
     if (pos >= instruction.operand_tokens.size()) {
-      return false;
+      return ExecStatus::Error;
     }
     ++pos;
     if (pos >= instruction.operand_tokens.size()) {
-      return false;
+      return ExecStatus::Error;
     }
     const std::string param_name = instruction.operand_tokens[pos].text;
     const auto it = parameter_offsets.find(param_name);
     if (it == parameter_offsets.end()) {
-      return false;
+      return ExecStatus::Error;
     }
     const std::size_t offset = it->second;
     std::uint64_t value = 0;
@@ -521,14 +529,14 @@ bool execute_instruction(
     std::memcpy(&value, arguments.data() + offset, bytes);
     registers.values[dst->index][lane] = value;
     next_pc = pc + 1;
-    return true;
+    return ExecStatus::Continue;
   }
 
   if (opcode == "mov.u32" || opcode == "mov.b32") {
     std::size_t pos = 0;
     auto dst = parse_register(instruction.operand_tokens, pos);
     if (!dst) {
-      return false;
+      return ExecStatus::Error;
     }
     while (pos < instruction.operand_tokens.size() &&
            instruction.operand_tokens[pos].kind ==
@@ -555,7 +563,7 @@ bool execute_instruction(
               ? static_cast<std::uint32_t>(-static_cast<std::int32_t>(value))
               : value;
       next_pc = pc + 1;
-      return true;
+      return ExecStatus::Continue;
     }
     if (pos < instruction.operand_tokens.size() &&
         instruction.operand_tokens[pos].kind ==
@@ -566,7 +574,7 @@ bool execute_instruction(
         registers.values[dst->index][lane] =
             static_cast<std::uint32_t>(shared_it->second);
         next_pc = pc + 1;
-        return true;
+        return ExecStatus::Continue;
       }
     }
     while (pos < instruction.operand_tokens.size() &&
@@ -575,7 +583,7 @@ bool execute_instruction(
       ++pos;
     }
     if (pos >= instruction.operand_tokens.size()) {
-      return false;
+      return ExecStatus::Error;
     }
     const std::size_t reg_start = pos;
     std::size_t ignored = pos;
@@ -593,7 +601,7 @@ bool execute_instruction(
           special_register_u32(special, config, block, lane_in_block, lane);
     }
     next_pc = pc + 1;
-    return true;
+    return ExecStatus::Continue;
   }
 
   if (opcode == "mad.lo.s32") {
@@ -606,7 +614,7 @@ bool execute_instruction(
     auto c =
         parse_u32_operand(instruction.operand_tokens, pos, registers, lane);
     if (!dst || !a || !b || !c) {
-      return false;
+      return ExecStatus::Error;
     }
     const auto av = static_cast<std::int32_t>(*a);
     const auto bv = static_cast<std::int32_t>(*b);
@@ -614,7 +622,7 @@ bool execute_instruction(
     const auto result = static_cast<std::uint32_t>(av * bv + cv);
     registers.values[dst->index][lane] = result;
     next_pc = pc + 1;
-    return true;
+    return ExecStatus::Continue;
   }
 
   if (opcode == "bfe.s32" || opcode == "bfe.u32") {
@@ -627,7 +635,7 @@ bool execute_instruction(
     auto c =
         parse_u32_operand(instruction.operand_tokens, pos, registers, lane);
     if (!dst || !a || !b || !c) {
-      return false;
+      return ExecStatus::Error;
     }
     const std::uint32_t src = *a;
     const std::uint32_t bit = *b & 31U;
@@ -649,7 +657,7 @@ bool execute_instruction(
     }
     registers.values[dst->index][lane] = result;
     next_pc = pc + 1;
-    return true;
+    return ExecStatus::Continue;
   }
 
   if (opcode == "or.pred" || opcode == "and.pred" || opcode == "not.pred") {
@@ -657,7 +665,7 @@ bool execute_instruction(
     if (pos >= instruction.operand_tokens.size() ||
         instruction.operand_tokens[pos].kind !=
             cudasim::ptx::TokenKind::Percent) {
-      return false;
+      return ExecStatus::Error;
     }
     ++pos;
     const std::string dst_name = instruction.operand_tokens[pos++].text;
@@ -696,7 +704,7 @@ bool execute_instruction(
     }
     if (!a || (opcode != "not.pred" && !b) ||
         dst_index >= registers.predicates.size()) {
-      return false;
+      return ExecStatus::Error;
     }
     if (opcode == "or.pred") {
       registers.predicates[dst_index][lane] = *a || *b;
@@ -706,7 +714,7 @@ bool execute_instruction(
       registers.predicates[dst_index][lane] = !*a;
     }
     next_pc = pc + 1;
-    return true;
+    return ExecStatus::Continue;
   }
 
   if (opcode == "setp.ge.s32") {
@@ -714,7 +722,7 @@ bool execute_instruction(
     if (pos >= instruction.operand_tokens.size() ||
         instruction.operand_tokens[pos].kind !=
             cudasim::ptx::TokenKind::Percent) {
-      return false;
+      return ExecStatus::Error;
     }
     ++pos;
     const std::string pred_name = instruction.operand_tokens[pos++].text;
@@ -726,13 +734,13 @@ bool execute_instruction(
     auto a = parse_register(instruction.operand_tokens, pos);
     auto b = parse_register(instruction.operand_tokens, pos);
     if (!a || !b || pred_index >= registers.predicates.size()) {
-      return false;
+      return ExecStatus::Error;
     }
     const auto av = static_cast<std::int32_t>(registers.values[a->index][lane]);
     const auto bv = static_cast<std::int32_t>(registers.values[b->index][lane]);
     registers.predicates[pred_index][lane] = av >= bv;
     next_pc = pc + 1;
-    return true;
+    return ExecStatus::Continue;
   }
 
   if (opcode == "setp.ge.f32" || opcode == "setp.gt.f32" ||
@@ -744,7 +752,7 @@ bool execute_instruction(
     if (pos >= instruction.operand_tokens.size() ||
         instruction.operand_tokens[pos].kind !=
             cudasim::ptx::TokenKind::Percent) {
-      return false;
+      return ExecStatus::Error;
     }
     ++pos;
     const std::string pred_name = instruction.operand_tokens[pos++].text;
@@ -758,7 +766,7 @@ bool execute_instruction(
     auto b =
         parse_f32_operand(instruction.operand_tokens, pos, registers, lane);
     if (!a || !b || pred_index >= registers.predicates.size()) {
-      return false;
+      return ExecStatus::Error;
     }
     const bool unordered = std::isnan(*a) || std::isnan(*b);
     if (opcode == "setp.ge.f32") {
@@ -783,7 +791,7 @@ bool execute_instruction(
       registers.predicates[pred_index][lane] = *a != *b || unordered;
     }
     next_pc = pc + 1;
-    return true;
+    return ExecStatus::Continue;
   }
 
   if (opcode == "selp.f32") {
@@ -801,7 +809,7 @@ bool execute_instruction(
     if (!dst || !a || !b || pos >= instruction.operand_tokens.size() ||
         instruction.operand_tokens[pos].kind !=
             cudasim::ptx::TokenKind::Percent) {
-      return false;
+      return ExecStatus::Error;
     }
     ++pos;
     const std::string pred_name = instruction.operand_tokens[pos++].text;
@@ -811,14 +819,14 @@ bool execute_instruction(
           pred_index * 10 + static_cast<std::size_t>(pred_name[i] - '0');
     }
     if (pred_index >= registers.predicates.size()) {
-      return false;
+      return ExecStatus::Error;
     }
     const float result = registers.predicates[pred_index][lane] ? *a : *b;
     std::uint32_t bits = 0;
     std::memcpy(&bits, &result, sizeof(bits));
     registers.values[dst->index][lane] = bits;
     next_pc = pc + 1;
-    return true;
+    return ExecStatus::Continue;
   }
 
   if (opcode == "selp.b64") {
@@ -834,7 +842,7 @@ bool execute_instruction(
     if (!dst || !a || !b || pos >= instruction.operand_tokens.size() ||
         instruction.operand_tokens[pos].kind !=
             cudasim::ptx::TokenKind::Percent) {
-      return false;
+      return ExecStatus::Error;
     }
     ++pos;
     const std::string pred_name = instruction.operand_tokens[pos++].text;
@@ -844,13 +852,13 @@ bool execute_instruction(
           pred_index * 10 + static_cast<std::size_t>(pred_name[i] - '0');
     }
     if (pred_index >= registers.predicates.size()) {
-      return false;
+      return ExecStatus::Error;
     }
     registers.values[dst->index][lane] = registers.predicates[pred_index][lane]
                                              ? registers.values[a->index][lane]
                                              : registers.values[b->index][lane];
     next_pc = pc + 1;
-    return true;
+    return ExecStatus::Continue;
   }
 
   if (opcode == "selp.b32" || opcode == "selp.u32" || opcode == "selp.s32") {
@@ -868,7 +876,7 @@ bool execute_instruction(
     if (!dst || !a || !b || pos >= instruction.operand_tokens.size() ||
         instruction.operand_tokens[pos].kind !=
             cudasim::ptx::TokenKind::Percent) {
-      return false;
+      return ExecStatus::Error;
     }
     ++pos;
     const std::string pred_name = instruction.operand_tokens[pos++].text;
@@ -878,13 +886,13 @@ bool execute_instruction(
           pred_index * 10 + static_cast<std::size_t>(pred_name[i] - '0');
     }
     if (pred_index >= registers.predicates.size()) {
-      return false;
+      return ExecStatus::Error;
     }
     const std::uint32_t result =
         registers.predicates[pred_index][lane] ? *a : *b;
     registers.values[dst->index][lane] = result;
     next_pc = pc + 1;
-    return true;
+    return ExecStatus::Continue;
   }
 
   if (opcode == "copysign.f32") {
@@ -895,14 +903,14 @@ bool execute_instruction(
     auto b =
         parse_f32_operand(instruction.operand_tokens, pos, registers, lane);
     if (!dst || !a || !b) {
-      return false;
+      return ExecStatus::Error;
     }
     const float result = std::copysign(*b, *a);
     std::uint32_t bits = 0;
     std::memcpy(&bits, &result, sizeof(bits));
     registers.values[dst->index][lane] = bits;
     next_pc = pc + 1;
-    return true;
+    return ExecStatus::Continue;
   }
 
   if (opcode == "cvta.to.global.u64") {
@@ -910,11 +918,11 @@ bool execute_instruction(
     auto dst = parse_register(instruction.operand_tokens, pos);
     auto src = parse_register(instruction.operand_tokens, pos);
     if (!dst || !src) {
-      return false;
+      return ExecStatus::Error;
     }
     registers.values[dst->index][lane] = registers.values[src->index][lane];
     next_pc = pc + 1;
-    return true;
+    return ExecStatus::Continue;
   }
 
   if (opcode == "mul.wide.s32" || opcode == "mul.wide.u32") {
@@ -927,7 +935,7 @@ bool execute_instruction(
       ++pos;
     }
     if (!dst || !a || pos >= instruction.operand_tokens.size()) {
-      return false;
+      return ExecStatus::Error;
     }
     std::uint64_t av = 0;
     std::uint64_t bv = 0;
@@ -949,7 +957,7 @@ bool execute_instruction(
     } else {
       auto b = parse_register(instruction.operand_tokens, pos);
       if (!b) {
-        return false;
+        return ExecStatus::Error;
       }
       if (opcode == "mul.wide.s32") {
         bv = static_cast<std::uint64_t>(static_cast<std::int64_t>(
@@ -960,7 +968,7 @@ bool execute_instruction(
     }
     registers.values[dst->index][lane] = av * bv;
     next_pc = pc + 1;
-    return true;
+    return ExecStatus::Continue;
   }
 
   if (opcode == "mad.wide.s32" || opcode == "mad.wide.u32") {
@@ -971,7 +979,7 @@ bool execute_instruction(
         parse_u32_operand(instruction.operand_tokens, pos, registers, lane);
     auto c = parse_register(instruction.operand_tokens, pos);
     if (!dst || !a || !b || !c) {
-      return false;
+      return ExecStatus::Error;
     }
     const bool is_signed = opcode == "mad.wide.s32";
     const std::uint64_t av =
@@ -987,7 +995,7 @@ bool execute_instruction(
     const std::uint64_t cv = registers.values[c->index][lane];
     registers.values[dst->index][lane] = av * bv + cv;
     next_pc = pc + 1;
-    return true;
+    return ExecStatus::Continue;
   }
 
   if (opcode == "add.s64") {
@@ -995,7 +1003,7 @@ bool execute_instruction(
     auto dst = parse_register(instruction.operand_tokens, pos);
     auto a = parse_register(instruction.operand_tokens, pos);
     if (!dst || !a) {
-      return false;
+      return ExecStatus::Error;
     }
     while (pos < instruction.operand_tokens.size() &&
            instruction.operand_tokens[pos].kind ==
@@ -1021,13 +1029,13 @@ bool execute_instruction(
     } else {
       auto b = parse_register(instruction.operand_tokens, pos);
       if (!b) {
-        return false;
+        return ExecStatus::Error;
       }
       bv = registers.values[b->index][lane];
     }
     registers.values[dst->index][lane] = registers.values[a->index][lane] + bv;
     next_pc = pc + 1;
-    return true;
+    return ExecStatus::Continue;
   }
 
   if (opcode == "or.b64" || opcode == "and.b64" || opcode == "xor.b64") {
@@ -1035,7 +1043,7 @@ bool execute_instruction(
     auto dst = parse_register(instruction.operand_tokens, pos);
     auto a = parse_register(instruction.operand_tokens, pos);
     if (!dst || !a) {
-      return false;
+      return ExecStatus::Error;
     }
     while (pos < instruction.operand_tokens.size() &&
            instruction.operand_tokens[pos].kind ==
@@ -1051,7 +1059,7 @@ bool execute_instruction(
     } else {
       auto b = parse_register(instruction.operand_tokens, pos);
       if (!b) {
-        return false;
+        return ExecStatus::Error;
       }
       bv = registers.values[b->index][lane];
     }
@@ -1066,14 +1074,14 @@ bool execute_instruction(
     }
     registers.values[dst->index][lane] = result;
     next_pc = pc + 1;
-    return true;
+    return ExecStatus::Continue;
   }
 
   if (opcode == "ld.global.f32") {
     std::size_t pos = 0;
     auto dst = parse_register(instruction.operand_tokens, pos);
     if (!dst) {
-      return false;
+      return ExecStatus::Error;
     }
     while (pos < instruction.operand_tokens.size() &&
            instruction.operand_tokens[pos].kind !=
@@ -1081,12 +1089,12 @@ bool execute_instruction(
       ++pos;
     }
     if (pos >= instruction.operand_tokens.size()) {
-      return false;
+      return ExecStatus::Error;
     }
     ++pos;
     auto address = parse_register(instruction.operand_tokens, pos);
     if (!address) {
-      return false;
+      return ExecStatus::Error;
     }
     std::size_t immediate = 0;
     if (pos + 1 < instruction.operand_tokens.size() &&
@@ -1104,14 +1112,14 @@ bool execute_instruction(
     std::memcpy(&bits, ptr, sizeof(bits));
     registers.values[dst->index][lane] = bits;
     next_pc = pc + 1;
-    return true;
+    return ExecStatus::Continue;
   }
 
   if (opcode == "ld.global.u32" || opcode == "ld.global.b32") {
     std::size_t pos = 0;
     auto dst = parse_register(instruction.operand_tokens, pos);
     if (!dst) {
-      return false;
+      return ExecStatus::Error;
     }
     while (pos < instruction.operand_tokens.size() &&
            instruction.operand_tokens[pos].kind !=
@@ -1119,12 +1127,12 @@ bool execute_instruction(
       ++pos;
     }
     if (pos >= instruction.operand_tokens.size()) {
-      return false;
+      return ExecStatus::Error;
     }
     ++pos;
     auto address = parse_register(instruction.operand_tokens, pos);
     if (!address) {
-      return false;
+      return ExecStatus::Error;
     }
     std::size_t immediate = 0;
     if (pos + 1 < instruction.operand_tokens.size() &&
@@ -1140,7 +1148,7 @@ bool execute_instruction(
         registers.values[address->index][lane] + immediate);
     registers.values[dst->index][lane] = *ptr;
     next_pc = pc + 1;
-    return true;
+    return ExecStatus::Continue;
   }
 
   if (opcode == "add.f32" || opcode == "add.rn.f32") {
@@ -1149,7 +1157,7 @@ bool execute_instruction(
     auto a = parse_register(instruction.operand_tokens, pos);
     auto b = parse_register(instruction.operand_tokens, pos);
     if (!dst || !a) {
-      return false;
+      return ExecStatus::Error;
     }
     float av = 0.0F;
     float bv = 0.0F;
@@ -1162,14 +1170,14 @@ bool execute_instruction(
     } else if (b) {
       std::memcpy(&bv, &registers.values[b->index][lane], sizeof(bv));
     } else {
-      return false;
+      return ExecStatus::Error;
     }
     const float result = av + bv;
     std::uint32_t bits = 0;
     std::memcpy(&bits, &result, sizeof(bits));
     registers.values[dst->index][lane] = bits;
     next_pc = pc + 1;
-    return true;
+    return ExecStatus::Continue;
   }
 
   if (opcode == "max.f32" || opcode == "min.f32") {
@@ -1180,7 +1188,7 @@ bool execute_instruction(
     auto b =
         parse_f32_operand(instruction.operand_tokens, pos, registers, lane);
     if (!dst || !a || !b) {
-      return false;
+      return ExecStatus::Error;
     }
     const float result =
         opcode == "max.f32" ? std::fmax(*a, *b) : std::fmin(*a, *b);
@@ -1188,7 +1196,7 @@ bool execute_instruction(
     std::memcpy(&bits, &result, sizeof(bits));
     registers.values[dst->index][lane] = bits;
     next_pc = pc + 1;
-    return true;
+    return ExecStatus::Continue;
   }
 
   if (opcode == "mul.f32" || opcode == "mul.rn.f32") {
@@ -1199,14 +1207,14 @@ bool execute_instruction(
     auto b =
         parse_f32_operand(instruction.operand_tokens, pos, registers, lane);
     if (!dst || !a || !b) {
-      return false;
+      return ExecStatus::Error;
     }
     const float result = *a * *b;
     std::uint32_t bits = 0;
     std::memcpy(&bits, &result, sizeof(bits));
     registers.values[dst->index][lane] = bits;
     next_pc = pc + 1;
-    return true;
+    return ExecStatus::Continue;
   }
 
   if (opcode == "fma.rn.f32" || opcode == "fma.rm.f32" ||
@@ -1220,14 +1228,14 @@ bool execute_instruction(
     auto c =
         parse_f32_operand(instruction.operand_tokens, pos, registers, lane);
     if (!dst || !a || !b || !c) {
-      return false;
+      return ExecStatus::Error;
     }
     const float result = std::fmaf(*a, *b, *c);
     std::uint32_t bits = 0;
     std::memcpy(&bits, &result, sizeof(bits));
     registers.values[dst->index][lane] = bits;
     next_pc = pc + 1;
-    return true;
+    return ExecStatus::Continue;
   }
 
   if (opcode == "st.global.f32") {
@@ -1238,12 +1246,12 @@ bool execute_instruction(
       ++pos;
     }
     if (pos >= instruction.operand_tokens.size()) {
-      return false;
+      return ExecStatus::Error;
     }
     ++pos;
     auto address = parse_register(instruction.operand_tokens, pos);
     if (!address) {
-      return false;
+      return ExecStatus::Error;
     }
     std::size_t immediate = 0;
     if (pos + 1 < instruction.operand_tokens.size() &&
@@ -1262,7 +1270,7 @@ bool execute_instruction(
     }
     auto value = parse_register(instruction.operand_tokens, pos);
     if (!value) {
-      return false;
+      return ExecStatus::Error;
     }
     auto *ptr = reinterpret_cast<float *>(
         registers.values[address->index][lane] + immediate);
@@ -1270,7 +1278,7 @@ bool execute_instruction(
     std::memcpy(&fv, &registers.values[value->index][lane], sizeof(fv));
     *ptr = fv;
     next_pc = pc + 1;
-    return true;
+    return ExecStatus::Continue;
   }
 
   if (opcode == "st.global.u32" || opcode == "st.global.b32") {
@@ -1281,12 +1289,12 @@ bool execute_instruction(
       ++pos;
     }
     if (pos >= instruction.operand_tokens.size()) {
-      return false;
+      return ExecStatus::Error;
     }
     ++pos;
     auto address = parse_register(instruction.operand_tokens, pos);
     if (!address) {
-      return false;
+      return ExecStatus::Error;
     }
     std::size_t immediate = 0;
     if (pos + 1 < instruction.operand_tokens.size() &&
@@ -1305,13 +1313,13 @@ bool execute_instruction(
     }
     auto value = parse_register(instruction.operand_tokens, pos);
     if (!value) {
-      return false;
+      return ExecStatus::Error;
     }
     auto *ptr = reinterpret_cast<std::uint32_t *>(
         registers.values[address->index][lane] + immediate);
     *ptr = static_cast<std::uint32_t>(registers.values[value->index][lane]);
     next_pc = pc + 1;
-    return true;
+    return ExecStatus::Continue;
   }
 
   if (opcode == "shl.b64") {
@@ -1324,7 +1332,7 @@ bool execute_instruction(
       ++pos;
     }
     if (!dst || !src || pos >= instruction.operand_tokens.size()) {
-      return false;
+      return ExecStatus::Error;
     }
     std::uint64_t amount = 0;
     if (instruction.operand_tokens[pos].kind ==
@@ -1334,14 +1342,14 @@ bool execute_instruction(
     } else {
       auto amount_reg = parse_register(instruction.operand_tokens, pos);
       if (!amount_reg) {
-        return false;
+        return ExecStatus::Error;
       }
       amount = registers.values[amount_reg->index][lane];
     }
     registers.values[dst->index][lane] = registers.values[src->index][lane]
                                          << amount;
     next_pc = pc + 1;
-    return true;
+    return ExecStatus::Continue;
   }
 
   if (opcode == "shl.b32" || opcode == "shr.s32" || opcode == "shr.u32") {
@@ -1354,7 +1362,7 @@ bool execute_instruction(
       ++pos;
     }
     if (!dst || !src || pos >= instruction.operand_tokens.size()) {
-      return false;
+      return ExecStatus::Error;
     }
     std::uint32_t amount = 0;
     if (instruction.operand_tokens[pos].kind ==
@@ -1364,7 +1372,7 @@ bool execute_instruction(
     } else {
       auto amount_reg = parse_register(instruction.operand_tokens, pos);
       if (!amount_reg) {
-        return false;
+        return ExecStatus::Error;
       }
       amount =
           static_cast<std::uint32_t>(registers.values[amount_reg->index][lane]);
@@ -1382,12 +1390,12 @@ bool execute_instruction(
     }
     registers.values[dst->index][lane] = result;
     next_pc = pc + 1;
-    return true;
+    return ExecStatus::Continue;
   }
 
   if (opcode == "bar.sync") {
     next_pc = pc + 1;
-    return true;
+    return ExecStatus::Continue;
   }
 
   if (opcode == "setp.ne.s32" || opcode == "setp.ne.u32") {
@@ -1395,7 +1403,7 @@ bool execute_instruction(
     if (pos >= instruction.operand_tokens.size() ||
         instruction.operand_tokens[pos].kind !=
             cudasim::ptx::TokenKind::Percent) {
-      return false;
+      return ExecStatus::Error;
     }
     ++pos;
     const std::string pred_name = instruction.operand_tokens[pos++].text;
@@ -1409,11 +1417,11 @@ bool execute_instruction(
     auto b =
         parse_u32_operand(instruction.operand_tokens, pos, registers, lane);
     if (!a || !b || pred_index >= registers.predicates.size()) {
-      return false;
+      return ExecStatus::Error;
     }
     registers.predicates[pred_index][lane] = *a != *b;
     next_pc = pc + 1;
-    return true;
+    return ExecStatus::Continue;
   }
 
   if (opcode == "st.shared.f32") {
@@ -1424,7 +1432,7 @@ bool execute_instruction(
       ++pos;
     }
     if (pos >= instruction.operand_tokens.size()) {
-      return false;
+      return ExecStatus::Error;
     }
     ++pos;
     auto address = parse_register(instruction.operand_tokens, pos);
@@ -1435,25 +1443,25 @@ bool execute_instruction(
     }
     auto value = parse_register(instruction.operand_tokens, pos);
     if (!address || !value) {
-      return false;
+      return ExecStatus::Error;
     }
     const std::size_t byte_offset =
         static_cast<std::size_t>(registers.values[address->index][lane]);
     if (byte_offset + sizeof(float) > shared_memory.size()) {
-      return false;
+      return ExecStatus::Error;
     }
     float fv = 0.0F;
     std::memcpy(&fv, &registers.values[value->index][lane], sizeof(fv));
     std::memcpy(shared_memory.data() + byte_offset, &fv, sizeof(fv));
     next_pc = pc + 1;
-    return true;
+    return ExecStatus::Continue;
   }
 
   if (opcode == "ld.shared.f32") {
     std::size_t pos = 0;
     auto dst = parse_register(instruction.operand_tokens, pos);
     if (!dst) {
-      return false;
+      return ExecStatus::Error;
     }
     while (pos < instruction.operand_tokens.size() &&
            instruction.operand_tokens[pos].kind !=
@@ -1461,7 +1469,7 @@ bool execute_instruction(
       ++pos;
     }
     if (pos >= instruction.operand_tokens.size()) {
-      return false;
+      return ExecStatus::Error;
     }
     ++pos;
 
@@ -1514,7 +1522,7 @@ bool execute_instruction(
     }
 
     if (!has_address || byte_offset + sizeof(float) > shared_memory.size()) {
-      return false;
+      return ExecStatus::Error;
     }
     float fv = 0.0F;
     std::memcpy(&fv, shared_memory.data() + byte_offset, sizeof(fv));
@@ -1522,7 +1530,7 @@ bool execute_instruction(
     std::memcpy(&bits, &fv, sizeof(bits));
     registers.values[dst->index][lane] = bits;
     next_pc = pc + 1;
-    return true;
+    return ExecStatus::Continue;
   }
 
   if (opcode == "atom.add.global.f32" || opcode == "atom.global.add.f32" ||
@@ -1534,7 +1542,7 @@ bool execute_instruction(
       ++pos;
     }
     if (pos >= instruction.operand_tokens.size()) {
-      return false;
+      return ExecStatus::Error;
     }
     ++pos;
     auto address = parse_register(instruction.operand_tokens, pos);
@@ -1545,7 +1553,7 @@ bool execute_instruction(
     }
     auto value = parse_register(instruction.operand_tokens, pos);
     if (!address || !value) {
-      return false;
+      return ExecStatus::Error;
     }
 
     if (opcode == "atom.add.global.f32" || opcode == "atom.global.add.f32") {
@@ -1561,14 +1569,14 @@ bool execute_instruction(
           static_cast<std::uint32_t>(registers.values[value->index][lane]));
     }
     next_pc = pc + 1;
-    return true;
+    return ExecStatus::Continue;
   }
 
   if (opcode == "mov.u64" || opcode == "mov.b64") {
     std::size_t pos = 0;
     auto dst = parse_register(instruction.operand_tokens, pos);
     if (!dst) {
-      return false;
+      return ExecStatus::Error;
     }
     while (pos < instruction.operand_tokens.size() &&
            instruction.operand_tokens[pos].kind ==
@@ -1592,33 +1600,33 @@ bool execute_instruction(
               ? static_cast<std::uint64_t>(-static_cast<std::int64_t>(value))
               : value;
       next_pc = pc + 1;
-      return true;
+      return ExecStatus::Continue;
     }
     auto src = parse_register(instruction.operand_tokens, pos);
     if (!src) {
-      return false;
+      return ExecStatus::Error;
     }
     registers.values[dst->index][lane] = registers.values[src->index][lane];
     next_pc = pc + 1;
-    return true;
+    return ExecStatus::Continue;
   }
 
   if (opcode == "mov.f32") {
     std::size_t pos = 0;
     auto dst = parse_register(instruction.operand_tokens, pos);
     if (!dst) {
-      return false;
+      return ExecStatus::Error;
     }
     auto value =
         parse_f32_operand(instruction.operand_tokens, pos, registers, lane);
     if (!value) {
-      return false;
+      return ExecStatus::Error;
     }
     std::uint32_t bits = 0;
     std::memcpy(&bits, &*value, sizeof(bits));
     registers.values[dst->index][lane] = bits;
     next_pc = pc + 1;
-    return true;
+    return ExecStatus::Continue;
   }
 
   if (opcode == "neg.s32" || opcode == "not.b32" || opcode == "abs.s32") {
@@ -1627,7 +1635,7 @@ bool execute_instruction(
     auto a =
         parse_u32_operand(instruction.operand_tokens, pos, registers, lane);
     if (!dst || !a) {
-      return false;
+      return ExecStatus::Error;
     }
     std::uint32_t result = 0;
     if (opcode == "neg.s32") {
@@ -1640,7 +1648,7 @@ bool execute_instruction(
     }
     registers.values[dst->index][lane] = result;
     next_pc = pc + 1;
-    return true;
+    return ExecStatus::Continue;
   }
 
   if (opcode == "add.s32" || opcode == "sub.s32" || opcode == "and.b32" ||
@@ -1654,7 +1662,7 @@ bool execute_instruction(
     auto b =
         parse_u32_operand(instruction.operand_tokens, pos, registers, lane);
     if (!dst || !a || !b) {
-      return false;
+      return ExecStatus::Error;
     }
     std::uint32_t result = 0;
     if (opcode == "add.s32") {
@@ -1690,7 +1698,7 @@ bool execute_instruction(
     }
     registers.values[dst->index][lane] = result;
     next_pc = pc + 1;
-    return true;
+    return ExecStatus::Continue;
   }
 
   if (opcode == "setp.eq.s64" || opcode == "setp.ne.s64" ||
@@ -1701,7 +1709,7 @@ bool execute_instruction(
     if (pos >= instruction.operand_tokens.size() ||
         instruction.operand_tokens[pos].kind !=
             cudasim::ptx::TokenKind::Percent) {
-      return false;
+      return ExecStatus::Error;
     }
     ++pos;
     const std::string pred_name = instruction.operand_tokens[pos++].text;
@@ -1712,7 +1720,7 @@ bool execute_instruction(
     }
     auto a = parse_register(instruction.operand_tokens, pos);
     if (!a || pred_index >= registers.predicates.size()) {
-      return false;
+      return ExecStatus::Error;
     }
     while (pos < instruction.operand_tokens.size() &&
            instruction.operand_tokens[pos].kind ==
@@ -1738,7 +1746,7 @@ bool execute_instruction(
     } else {
       auto b = parse_register(instruction.operand_tokens, pos);
       if (!b) {
-        return false;
+        return ExecStatus::Error;
       }
       bv = registers.values[b->index][lane];
     }
@@ -1759,7 +1767,7 @@ bool execute_instruction(
       registers.predicates[pred_index][lane] = av_signed >= bv_signed;
     }
     next_pc = pc + 1;
-    return true;
+    return ExecStatus::Continue;
   }
 
   if (opcode == "setp.lt.s32" || opcode == "setp.lt.u32" ||
@@ -1770,7 +1778,7 @@ bool execute_instruction(
     if (pos >= instruction.operand_tokens.size() ||
         instruction.operand_tokens[pos].kind !=
             cudasim::ptx::TokenKind::Percent) {
-      return false;
+      return ExecStatus::Error;
     }
     ++pos;
     const std::string pred_name = instruction.operand_tokens[pos++].text;
@@ -1784,7 +1792,7 @@ bool execute_instruction(
     auto b =
         parse_u32_operand(instruction.operand_tokens, pos, registers, lane);
     if (!a || !b || pred_index >= registers.predicates.size()) {
-      return false;
+      return ExecStatus::Error;
     }
     if (opcode == "setp.eq.s32" || opcode == "setp.eq.b32") {
       registers.predicates[pred_index][lane] = *a == *b;
@@ -1803,7 +1811,7 @@ bool execute_instruction(
       registers.predicates[pred_index][lane] = *a < *b;
     }
     next_pc = pc + 1;
-    return true;
+    return ExecStatus::Continue;
   }
 
   if (opcode == "cvt.rn.f32.s32" || opcode == "cvt.rn.f32.u32") {
@@ -1812,7 +1820,7 @@ bool execute_instruction(
     auto src =
         parse_u32_operand(instruction.operand_tokens, pos, registers, lane);
     if (!dst || !src) {
-      return false;
+      return ExecStatus::Error;
     }
     const float value =
         opcode == "cvt.rn.f32.s32"
@@ -1822,7 +1830,7 @@ bool execute_instruction(
     std::memcpy(&bits, &value, sizeof(bits));
     registers.values[dst->index][lane] = bits;
     next_pc = pc + 1;
-    return true;
+    return ExecStatus::Continue;
   }
 
   if (opcode == "cvt.rzi.s32.f32" || opcode == "cvt.rzi.u32.f32") {
@@ -1831,7 +1839,7 @@ bool execute_instruction(
     auto a =
         parse_f32_operand(instruction.operand_tokens, pos, registers, lane);
     if (!dst || !a) {
-      return false;
+      return ExecStatus::Error;
     }
     if (opcode == "cvt.rzi.s32.f32") {
       registers.values[dst->index][lane] =
@@ -1840,7 +1848,7 @@ bool execute_instruction(
       registers.values[dst->index][lane] = static_cast<std::uint32_t>(*a);
     }
     next_pc = pc + 1;
-    return true;
+    return ExecStatus::Continue;
   }
 
   if (opcode == "cvt.s64.s32") {
@@ -1849,12 +1857,12 @@ bool execute_instruction(
     auto src =
         parse_u32_operand(instruction.operand_tokens, pos, registers, lane);
     if (!dst || !src) {
-      return false;
+      return ExecStatus::Error;
     }
     registers.values[dst->index][lane] =
         static_cast<std::uint64_t>(static_cast<std::int32_t>(*src));
     next_pc = pc + 1;
-    return true;
+    return ExecStatus::Continue;
   }
 
   if (opcode == "cvt.u64.u32") {
@@ -1863,11 +1871,11 @@ bool execute_instruction(
     auto src =
         parse_u32_operand(instruction.operand_tokens, pos, registers, lane);
     if (!dst || !src) {
-      return false;
+      return ExecStatus::Error;
     }
     registers.values[dst->index][lane] = static_cast<std::uint64_t>(*src);
     next_pc = pc + 1;
-    return true;
+    return ExecStatus::Continue;
   }
 
   if (opcode == "cvt.u32.u64") {
@@ -1875,12 +1883,12 @@ bool execute_instruction(
     auto dst = parse_register(instruction.operand_tokens, pos);
     auto src = parse_register(instruction.operand_tokens, pos);
     if (!dst || !src) {
-      return false;
+      return ExecStatus::Error;
     }
     registers.values[dst->index][lane] =
         static_cast<std::uint32_t>(registers.values[src->index][lane]);
     next_pc = pc + 1;
-    return true;
+    return ExecStatus::Continue;
   }
 
   if (opcode == "neg.f32" || opcode == "cvt.sat.f32.f32" ||
@@ -1898,7 +1906,7 @@ bool execute_instruction(
     auto a =
         parse_f32_operand(instruction.operand_tokens, pos, registers, lane);
     if (!dst || !a) {
-      return false;
+      return ExecStatus::Error;
     }
     float result = 0.0F;
     if (opcode == "neg.f32") {
@@ -1935,7 +1943,7 @@ bool execute_instruction(
     std::memcpy(&bits, &result, sizeof(bits));
     registers.values[dst->index][lane] = bits;
     next_pc = pc + 1;
-    return true;
+    return ExecStatus::Continue;
   }
 
   if (opcode == "div.rn.f32" || opcode == "div.approx.f32" ||
@@ -1951,7 +1959,7 @@ bool execute_instruction(
       b = parse_f32_operand(instruction.operand_tokens, pos, registers, lane);
     }
     if (!dst || !a || (opcode != "sqrt.rn.f32" && !b)) {
-      return false;
+      return ExecStatus::Error;
     }
     float result = 0.0F;
     if (opcode == "div.rn.f32" || opcode == "div.approx.f32" ||
@@ -1967,11 +1975,89 @@ bool execute_instruction(
     std::memcpy(&bits, &result, sizeof(bits));
     registers.values[dst->index][lane] = bits;
     next_pc = pc + 1;
-    return true;
+    return ExecStatus::Continue;
+  }
+
+  if (opcode == "mov.u16" || opcode == "mov.s16" || opcode == "and.b16" ||
+      opcode == "selp.b16" || opcode == "setp.eq.s16" ||
+      opcode == "setp.ne.s16") {
+    std::size_t pos = 0;
+
+    auto read_pred_index = [&](std::size_t &p) -> std::optional<std::size_t> {
+      while (p < instruction.operand_tokens.size() &&
+             instruction.operand_tokens[p].kind ==
+                 cudasim::ptx::TokenKind::Comma) {
+        ++p;
+      }
+      if (p >= instruction.operand_tokens.size() ||
+          instruction.operand_tokens[p].kind !=
+              cudasim::ptx::TokenKind::Percent) {
+        return std::nullopt;
+      }
+      ++p;
+      if (p >= instruction.operand_tokens.size() ||
+          instruction.operand_tokens[p].kind !=
+              cudasim::ptx::TokenKind::Identifier) {
+        return std::nullopt;
+      }
+      const std::string name = instruction.operand_tokens[p++].text;
+      std::size_t index = 0;
+      for (std::size_t i = 1; i < name.size(); ++i) {
+        index = index * 10 + static_cast<std::size_t>(name[i] - '0');
+      }
+      return index;
+    };
+
+    if (opcode == "setp.eq.s16" || opcode == "setp.ne.s16") {
+      auto pred_index = read_pred_index(pos);
+      auto a =
+          parse_u32_operand(instruction.operand_tokens, pos, registers, lane);
+      auto b =
+          parse_u32_operand(instruction.operand_tokens, pos, registers, lane);
+      if (!pred_index || !a || !b ||
+          *pred_index >= registers.predicates.size()) {
+        return ExecStatus::Error;
+      }
+      const auto av = static_cast<std::uint16_t>(*a);
+      const auto bv = static_cast<std::uint16_t>(*b);
+      registers.predicates[*pred_index][lane] =
+          opcode == "setp.eq.s16" ? av == bv : av != bv;
+      next_pc = pc + 1;
+      return ExecStatus::Continue;
+    }
+
+    auto dst = parse_register(instruction.operand_tokens, pos);
+    auto a =
+        parse_u32_operand(instruction.operand_tokens, pos, registers, lane);
+    if (!dst || !a) {
+      return ExecStatus::Error;
+    }
+    std::uint32_t result = 0;
+    if (opcode == "and.b16") {
+      auto b =
+          parse_u32_operand(instruction.operand_tokens, pos, registers, lane);
+      if (!b) {
+        return ExecStatus::Error;
+      }
+      result = *a & *b;
+    } else if (opcode == "selp.b16") {
+      auto b =
+          parse_u32_operand(instruction.operand_tokens, pos, registers, lane);
+      auto pred_index = read_pred_index(pos);
+      if (!b || !pred_index || *pred_index >= registers.predicates.size()) {
+        return ExecStatus::Error;
+      }
+      result = registers.predicates[*pred_index][lane] ? *a : *b;
+    } else {
+      result = *a;
+    }
+    registers.values[dst->index][lane] = result & 0xFFFFU;
+    next_pc = pc + 1;
+    return ExecStatus::Continue;
   }
 
   next_pc = pc + 1;
-  return true;
+  return ExecStatus::Error;
 }
 
 } // namespace
@@ -2025,6 +2111,7 @@ bool Executor::execute(const cudasim::ptx::FunctionIR &function,
   const unsigned int grid_y = config.grid[1];
   const unsigned int grid_z = config.grid[2];
 
+  bool failed = false;
   for (unsigned int gz = 0; gz < grid_z; ++gz) {
     for (unsigned int gy = 0; gy < grid_y; ++gy) {
       for (unsigned int gx = 0; gx < grid_x; ++gx) {
@@ -2137,13 +2224,20 @@ bool Executor::execute(const cudasim::ptx::FunctionIR &function,
               }
 
               std::size_t next_pc = current_pc + 1;
-              const bool still_active = execute_instruction(
+              const ExecStatus status = execute_instruction(
                   flat[current_pc], config, block, runtime.registers, lane,
                   lane_base + lane, arguments, parameter_offsets, shared_memory,
                   shared_offsets, next_pc, current_pc, labels);
               runtime.pc[lane] = next_pc;
-              if (!still_active) {
+              if (status == ExecStatus::Exit) {
                 runtime.active[lane] = false;
+              } else if (status == ExecStatus::Error) {
+                std::fprintf(
+                    stderr,
+                    "simulator: unsupported or invalid PTX instruction: %s\n",
+                    flat[current_pc].opcode.c_str());
+                failed = true;
+                goto done;
               }
             }
 
@@ -2180,7 +2274,8 @@ bool Executor::execute(const cudasim::ptx::FunctionIR &function,
     }
   }
 
-  return true;
+done:
+  return !failed;
 }
 
 } // namespace cudasim::exec
