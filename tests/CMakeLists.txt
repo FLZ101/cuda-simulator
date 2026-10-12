@@ -21,6 +21,7 @@ set(GENERATED_PTX_DIR ${CMAKE_CURRENT_BINARY_DIR}/ptx)
 set(GENERATED_VECTOR_ADD_PTX ${GENERATED_PTX_DIR}/vector_add.ptx)
 set(GENERATED_SHARED_PTX ${GENERATED_PTX_DIR}/shared_memory.ptx)
 set(GENERATED_MULTI_WARP_PTX ${GENERATED_PTX_DIR}/multi_warp_barrier.ptx)
+set(GENERATED_BLOCK_PARALLEL_PTX ${GENERATED_PTX_DIR}/block_parallel.ptx)
 set(GENERATED_SAXPY_PTX ${GENERATED_PTX_DIR}/saxpy.ptx)
 set(GENERATED_COPY_PTX ${GENERATED_PTX_DIR}/copy.ptx)
 set(GENERATED_MATMUL_NAIVE_PTX ${GENERATED_PTX_DIR}/matmul_naive.ptx)
@@ -373,6 +374,17 @@ add_custom_command(
 )
 add_custom_target(generate_multi_warp_ptx DEPENDS ${GENERATED_MULTI_WARP_PTX})
 
+add_custom_command(
+  OUTPUT ${GENERATED_BLOCK_PARALLEL_PTX}
+  COMMAND ${CMAKE_COMMAND} -E make_directory ${GENERATED_PTX_DIR}
+  COMMAND ${CUDAToolkit_NVCC_EXECUTABLE} -ptx -arch=compute_80
+          ${CMAKE_CURRENT_SOURCE_DIR}/ptx/block_parallel_kernel.cu
+          -o ${GENERATED_BLOCK_PARALLEL_PTX}
+  DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/ptx/block_parallel_kernel.cu
+  VERBATIM
+)
+add_custom_target(generate_block_parallel_ptx DEPENDS ${GENERATED_BLOCK_PARALLEL_PTX})
+
 foreach(group IN LISTS KERNEL_GROUPS)
   foreach(kernel IN LISTS KERNELS_${group})
     set(KERNEL_SOURCE ${CMAKE_CURRENT_SOURCE_DIR}/kernels/${group}/${kernel}.cu)
@@ -468,6 +480,23 @@ cudasim_set_warnings(multi_warp_barrier_exec_smoke)
 cudasim_apply_sanitizers(multi_warp_barrier_exec_smoke)
 add_dependencies(multi_warp_barrier_exec_smoke generate_multi_warp_ptx)
 add_test(NAME ptx.multi_warp_barrier_exec_smoke COMMAND multi_warp_barrier_exec_smoke)
+
+add_executable(block_parallel_bench
+  ptx/block_parallel_bench.cpp
+)
+target_compile_features(block_parallel_bench PRIVATE cxx_std_20)
+target_include_directories(block_parallel_bench PRIVATE ${CMAKE_SOURCE_DIR}/src)
+target_link_libraries(block_parallel_bench PRIVATE cuda_shim)
+target_compile_definitions(block_parallel_bench PRIVATE
+  PTX_FIXTURE_PATH="${GENERATED_BLOCK_PARALLEL_PTX}"
+)
+cudasim_set_warnings(block_parallel_bench)
+cudasim_apply_sanitizers(block_parallel_bench)
+add_dependencies(block_parallel_bench generate_block_parallel_ptx)
+add_test(
+  NAME bench.block_parallel
+  COMMAND block_parallel_bench --n 8192 --iterations 16 --block 256 --runs 1
+)
 
 add_executable(scalar_math_exec_smoke
   ptx/scalar_math_exec_smoke.cpp
