@@ -23,6 +23,10 @@ Additional documentation:
 - clang-format
 - optional LLVM development package when `CUDA_SIM_ENABLE_JIT=ON`
 
+WSL2 works like a native Linux distro for the CUDA toolkit: install the
+toolkit inside the Linux filesystem; the GPU driver is supplied by the Windows
+host.
+
 ## Tested environments
 
 - Ubuntu 26.04.1 LTS (x86-64), kernel 7.0.0-38-generic, CUDA 13.3 (nvcc
@@ -45,18 +49,8 @@ The Makefile drives CMake with Ninja by default.
 make build      configure and build
 make test       build and run tests
 make run        build and run the CLI
-make install-hooks  configure Git pre-commit hooks
-make format     format C++ sources with clang-format
 make clean      remove the build directory
 ```
-
-Install the Git pre-commit hook:
-
-```bash
-make install-hooks
-```
-
-The hook runs `clang-format` on staged C/C++ files using the LLVM style.
 
 Direct CMake configuration is still available:
 

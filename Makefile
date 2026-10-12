@@ -9,8 +9,14 @@ VENV_BLACK ?= $(VENV)/bin/black
 VENV_PRE_COMMIT ?= $(VENV)/bin/pre-commit
 VENV_MARKER ?= $(VENV)/.marker
 
-PYTORCH_INDEX_URL ?= https://download.pytorch.org/whl/cu130
-TORCH_VERSION ?= 2.14.1+cu130
+# Detect the CUDA toolkit version and derive the PyTorch wheel tag. PyTorch
+# publishes wheels per CUDA release line (CUDA 13 -> cu130), not per toolkit
+# minor/patch. Override PYTORCH_CUDA_TAG for a different CUDA line.
+NVCC ?= $(shell command -v nvcc 2>/dev/null || echo /usr/local/cuda/bin/nvcc)
+CUDA_MAJOR := $(shell $(NVCC) --version 2>/dev/null | sed -n 's/.*release \([0-9]*\)\.[0-9]*.*/\1/p')
+PYTORCH_CUDA_TAG ?= cu$(CUDA_MAJOR)0
+PYTORCH_INDEX_URL ?= https://download.pytorch.org/whl/$(PYTORCH_CUDA_TAG)
+TORCH_VERSION ?= 2.14.1+$(PYTORCH_CUDA_TAG)
 TRITON_VERSION ?= 3.8.0
 
 CMAKE_FLAGS := \
