@@ -149,13 +149,21 @@ Reference constraints:
 - verification: `cmake --build build -j` and
   `ctest --test-dir build -R 'models\.gpt2_multihead\.runner_(cpu|sim)'
   --output-on-failure` both pass; all 16 traced model-runner tests pass.
+- Added a full GPT-2 transformer block fixture composed of two pre-norm
+  `LayerNorm` paths, multi-head attention, a `Linear`-`GELU`-`Linear` MLP,
+  and residual `operator.add` connections. No new converter lowering was
+  needed beyond the existing block operators.
+- files: `tests/CMakeLists.txt`, `tests/models/fixtures/gpt2_block.py`
+- verification: `cmake --build build -j` and
+  `ctest --test-dir build -R 'models\.gpt2_block\.runner_(cpu|sim)'
+  --output-on-failure` both pass; all 18 traced model-runner tests pass.
 
 ## Verification
 
-Checkpoints 1-3 pass:
+Checkpoints 1-4 pass:
 
 ```bash
-ctest --test-dir build -R 'models\.gpt2_(embedding|attention|multihead)\.runner_(cpu|sim)' --output-on-failure
+ctest --test-dir build -R 'models\.gpt2_(embedding|attention|multihead|block)\.runner_(cpu|sim)' --output-on-failure
 ```
 
 ## Status

@@ -637,8 +637,8 @@ Current status:
 - Step 9 is in progress in `steps/STEP_09.md`; the small-shape ResNet-50
   simulator forward pass is green.
 - Step 10 is in progress in `steps/STEP_10.md`; embedding, single-head
-  attention, and multi-head attention checkpoints are green, with transformer
-  blocks and the LM head still to lower.
+  attention, multi-head attention, and one GPT-2 transformer block checkpoints
+  are green, with the full stack and LM head still to lower.
 - Step 8's `nvcc` operator execution qualification is implemented and green:
   generated kernels are grouped into operator families and tested through one
   CTest target per group with the real GPU as golden reference, including

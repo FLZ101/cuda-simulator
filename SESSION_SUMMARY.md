@@ -34,10 +34,12 @@ PTX only (never CUBIN/SASS). v1 correctness targets:
   (`tests/models/specs/_common.py`) generates the C++ from a `Runner`
   description. `vector_add`, `matmul`, and `mlp` are declarative `build_runner`
   specs; `module.py` is the generic FX-traced converter.
-- **Step 10 checkpoints 1-3**: `tests/models/specs/module.py` now lowers
+- **Step 10 checkpoints 1-4**: `tests/models/specs/module.py` now lowers
   traced `nn.Embedding`, `causal_softmax`, and wrapped `multihead_attention`
-  calls to SIMT PTX kernels. The new `models.gpt2_embedding`,
-  `models.gpt2_attention`, and `models.gpt2_multihead` CPU/sim tests pass.
+  calls to SIMT PTX kernels, and a full GPT-2 transformer block runs through
+  the traced model flow. The new `models.gpt2_embedding`,
+  `models.gpt2_attention`, `models.gpt2_multihead`, and `models.gpt2_block`
+  CPU/sim tests pass.
 
 ## Where Things Live
 
@@ -82,7 +84,7 @@ PTX only (never CUBIN/SASS). v1 correctness targets:
 1. Replace the fixed 1024-per-bank register banks with a
    `.reg`-declaration-driven `RegisterLayout` once a generated kernel exceeds
    current capacity.
-2. Continue extending the model-runner converter for GPT-2 residual blocks and
-   the LM head. Token embedding and single/multi-head causal attention lowering
-   are complete.
+2. Continue extending the model-runner converter for the full GPT-2 stack and
+   LM head. Token embedding, causal attention, and one transformer block
+   lowering are complete.
 3. Add missing PTX semantics as newly generated kernels expose them.
