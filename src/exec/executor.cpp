@@ -663,6 +663,64 @@ ExecStatus execute_instruction(
     return ExecStatus::Continue;
   }
 
+  if (opcode == "mov.pred") {
+    std::size_t pos = 0;
+    if (pos >= instruction.operand_tokens.size() ||
+        instruction.operand_tokens[pos].kind !=
+            cudasim::ptx::TokenKind::Percent) {
+      return ExecStatus::Error;
+    }
+    ++pos;
+    if (pos >= instruction.operand_tokens.size() ||
+        instruction.operand_tokens[pos].kind !=
+            cudasim::ptx::TokenKind::Identifier) {
+      return ExecStatus::Error;
+    }
+    const std::string dst_name = instruction.operand_tokens[pos++].text;
+    std::size_t dst_index = 0;
+    for (std::size_t i = 1; i < dst_name.size(); ++i) {
+      dst_index = dst_index * 10 + static_cast<std::size_t>(dst_name[i] - '0');
+    }
+    while (pos < instruction.operand_tokens.size() &&
+           instruction.operand_tokens[pos].kind ==
+               cudasim::ptx::TokenKind::Comma) {
+      ++pos;
+    }
+    if (pos >= instruction.operand_tokens.size() ||
+        dst_index >= registers.predicates.size()) {
+      return ExecStatus::Error;
+    }
+
+    bool value = false;
+    if (instruction.operand_tokens[pos].kind ==
+        cudasim::ptx::TokenKind::Number) {
+      value = std::stoul(instruction.operand_tokens[pos].text, nullptr, 0) != 0;
+    } else if (instruction.operand_tokens[pos].kind ==
+               cudasim::ptx::TokenKind::Percent) {
+      ++pos;
+      if (pos >= instruction.operand_tokens.size() ||
+          instruction.operand_tokens[pos].kind !=
+              cudasim::ptx::TokenKind::Identifier) {
+        return ExecStatus::Error;
+      }
+      const std::string src_name = instruction.operand_tokens[pos].text;
+      std::size_t src_index = 0;
+      for (std::size_t i = 1; i < src_name.size(); ++i) {
+        src_index =
+            src_index * 10 + static_cast<std::size_t>(src_name[i] - '0');
+      }
+      if (src_index >= registers.predicates.size()) {
+        return ExecStatus::Error;
+      }
+      value = registers.predicates[src_index][lane];
+    } else {
+      return ExecStatus::Error;
+    }
+    registers.predicates[dst_index][lane] = value;
+    next_pc = pc + 1;
+    return ExecStatus::Continue;
+  }
+
   if (opcode == "or.pred" || opcode == "and.pred" || opcode == "not.pred") {
     std::size_t pos = 0;
     if (pos >= instruction.operand_tokens.size() ||
@@ -1707,7 +1765,10 @@ ExecStatus execute_instruction(
   if (opcode == "setp.eq.s64" || opcode == "setp.ne.s64" ||
       opcode == "setp.lt.s64" || opcode == "setp.le.s64" ||
       opcode == "setp.gt.s64" || opcode == "setp.ge.s64" ||
-      opcode == "setp.eq.b64" || opcode == "setp.ne.b64") {
+      opcode == "setp.eq.b64" || opcode == "setp.ne.b64" ||
+      opcode == "setp.eq.u64" || opcode == "setp.ne.u64" ||
+      opcode == "setp.lt.u64" || opcode == "setp.le.u64" ||
+      opcode == "setp.gt.u64" || opcode == "setp.ge.u64") {
     std::size_t pos = 0;
     if (pos >= instruction.operand_tokens.size() ||
         instruction.operand_tokens[pos].kind !=
@@ -1756,18 +1817,28 @@ ExecStatus execute_instruction(
     const std::uint64_t av = registers.values[a->index][lane];
     const auto av_signed = static_cast<std::int64_t>(av);
     const auto bv_signed = static_cast<std::int64_t>(bv);
-    if (opcode == "setp.eq.s64" || opcode == "setp.eq.b64") {
+    if (opcode == "setp.eq.s64" || opcode == "setp.eq.b64" ||
+        opcode == "setp.eq.u64") {
       registers.predicates[pred_index][lane] = av == bv;
-    } else if (opcode == "setp.ne.s64" || opcode == "setp.ne.b64") {
+    } else if (opcode == "setp.ne.s64" || opcode == "setp.ne.b64" ||
+               opcode == "setp.ne.u64") {
       registers.predicates[pred_index][lane] = av != bv;
     } else if (opcode == "setp.lt.s64") {
       registers.predicates[pred_index][lane] = av_signed < bv_signed;
+    } else if (opcode == "setp.lt.u64") {
+      registers.predicates[pred_index][lane] = av < bv;
     } else if (opcode == "setp.le.s64") {
       registers.predicates[pred_index][lane] = av_signed <= bv_signed;
+    } else if (opcode == "setp.le.u64") {
+      registers.predicates[pred_index][lane] = av <= bv;
     } else if (opcode == "setp.gt.s64") {
       registers.predicates[pred_index][lane] = av_signed > bv_signed;
-    } else {
+    } else if (opcode == "setp.gt.u64") {
+      registers.predicates[pred_index][lane] = av > bv;
+    } else if (opcode == "setp.ge.s64") {
       registers.predicates[pred_index][lane] = av_signed >= bv_signed;
+    } else {
+      registers.predicates[pred_index][lane] = av >= bv;
     }
     next_pc = pc + 1;
     return ExecStatus::Continue;

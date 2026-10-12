@@ -34,6 +34,7 @@ def compile_kernel(kernel, grid, args, kwargs) -> str:
 def runner_prelude() -> str:
     return """#include <cuda.h>
 
+#include <cstdio>
 #include <fstream>
 #include <sstream>
 #include <string>

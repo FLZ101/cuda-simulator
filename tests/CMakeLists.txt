@@ -511,6 +511,32 @@ cudasim_set_warnings(scalar_math_exec_smoke)
 cudasim_apply_sanitizers(scalar_math_exec_smoke)
 add_test(NAME ptx.scalar_math_exec_smoke COMMAND scalar_math_exec_smoke)
 
+add_executable(setp_u64_exec_smoke
+  ptx/setp_u64_exec_smoke.cpp
+)
+target_compile_features(setp_u64_exec_smoke PRIVATE cxx_std_20)
+target_include_directories(setp_u64_exec_smoke PRIVATE ${CMAKE_SOURCE_DIR}/src)
+target_link_libraries(setp_u64_exec_smoke PRIVATE cuda_shim)
+target_compile_definitions(setp_u64_exec_smoke PRIVATE
+  PTX_FIXTURE_PATH="${CMAKE_CURRENT_SOURCE_DIR}/ptx/setp_u64_kernel.ptx"
+)
+cudasim_set_warnings(setp_u64_exec_smoke)
+cudasim_apply_sanitizers(setp_u64_exec_smoke)
+add_test(NAME ptx.setp_u64_exec_smoke COMMAND setp_u64_exec_smoke)
+
+add_executable(mov_pred_exec_smoke
+  ptx/mov_pred_exec_smoke.cpp
+)
+target_compile_features(mov_pred_exec_smoke PRIVATE cxx_std_20)
+target_include_directories(mov_pred_exec_smoke PRIVATE ${CMAKE_SOURCE_DIR}/src)
+target_link_libraries(mov_pred_exec_smoke PRIVATE cuda_shim)
+target_compile_definitions(mov_pred_exec_smoke PRIVATE
+  PTX_FIXTURE_PATH="${CMAKE_CURRENT_SOURCE_DIR}/ptx/mov_pred_kernel.ptx"
+)
+cudasim_set_warnings(mov_pred_exec_smoke)
+cudasim_apply_sanitizers(mov_pred_exec_smoke)
+add_test(NAME ptx.mov_pred_exec_smoke COMMAND mov_pred_exec_smoke)
+
 add_test(
   NAME ptx.simt_gate
   COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/generated/check_simt.py

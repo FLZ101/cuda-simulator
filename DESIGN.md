@@ -634,6 +634,8 @@ Current status:
 
 - Steps 0 through 8 are implemented and recorded in `steps/STEP_00.md` through
   `steps/STEP_08.md`.
+- Step 9 is planned in `steps/STEP_09.md`; work is starting on the ResNet-50
+  end-to-end runner.
 - Step 8's `nvcc` operator execution qualification is implemented and green:
   generated kernels are grouped into operator families and tested through one
   CTest target per group with the real GPU as golden reference, including
@@ -1137,13 +1139,17 @@ Only after this gate passes may work proceed to Step 9.
 
 ### Step 9: ResNet End-to-End
 
-Generate a standalone `resnet50_runner` host executable.
+Generate a standalone `resnet50_runner` host executable by reusing the Step 8
+PyTorch-generated model-runner flow. The detailed current plan is recorded in
+`steps/STEP_09.md`.
 
 Constraints:
 
 - no cuDNN, cuBLAS, or cuFFT
 - all Conv/BatchNorm/ReLU/pool/linear operations are explicit PTX kernels
 - PTX must pass the SIMT-only gate
+- generated kernels must be embedded in the host runner, never supplied as a
+  separate PTX file at runtime
 
 Runner contract:
 
@@ -1164,11 +1170,16 @@ compare final logits and predicted class
 
 Incremental checkpoints:
 
-1. First convolution block.
-2. First residual block.
-3. Stage 1.
-4. All stages.
-5. Full network.
+1. Existing Step 8 ResNet stem: `Conv2d -> BatchNorm2d -> ReLU -> MaxPool2d`.
+2. One Bottleneck residual block with identity and downsample paths.
+3. First residual stage.
+4. All four residual stages.
+5. Full ResNet-50 with adaptive average pooling and linear head.
+
+Use a small spatial shape while iterating on generated PTX semantics, then run
+the final gate at `1 x 3 x 224 x 224`. The existing `module` spec must emit one
+native runner per fixture and the corresponding CTest targets must run both the
+PyTorch CPU reference and the simulator run.
 
 Verification:
 

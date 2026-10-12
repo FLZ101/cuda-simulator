@@ -830,6 +830,16 @@ def _shape_map(traced, example_input):
             if left_shape[1] != right_shape[0]:
                 raise RuntimeError(f"mismatched torch.matmul shapes for {node.name}")
             shapes[node.name] = [left_shape[0], right_shape[1]]
+        elif node.op == "call_function" and node.target is torch.flatten:
+            input_name = _predecessor_name(node)
+            input_shape = shapes[input_name]
+            start_dim = node.args[1] if len(node.args) >= 2 else 0
+            if start_dim != 1:
+                raise RuntimeError("only torch.flatten(x, start_dim=1) is supported")
+            flat = 1
+            for dim in input_shape[1:]:
+                flat *= dim
+            shapes[node.name] = [input_shape[0], flat]
         elif node.op == "call_method" and node.target == "transpose":
             input_name = _predecessor_name(node)
             input_shape = shapes[input_name]
@@ -883,6 +893,17 @@ def _graph_program(traced, shapes):
                     "kind": "matmul",
                     "name": node.name,
                     "inputs": (left_name, right_name),
+                    "shape": shapes[node.name],
+                }
+            )
+            continue
+        if node.op == "call_function" and node.target is torch.flatten:
+            input_name = _predecessor_name(node)
+            program.append(
+                {
+                    "kind": "copy",
+                    "name": node.name,
+                    "input": input_name,
                     "shape": shapes[node.name],
                 }
             )
@@ -2157,6 +2178,16 @@ def _generate_cpp(
 }""")
     launch_helpers_text = "\n".join(launch_helpers)
 
+    progress_launches = []
+    for index, launch in enumerate(launches):
+        node_name = program[index]["name"]
+        progress_launches.append(
+            launch
+            + f"""\n  std::fprintf(stderr, "[model] completed %d/%d nodes (%.1f%%): {node_name}\\n",
+               ++completed_nodes, total_nodes,
+               100.0 * static_cast<double>(completed_nodes) / total_nodes);"""
+        )
+
     source = runner_prelude() + f"""
 {launch_helpers_text}
 
@@ -2208,7 +2239,10 @@ int main(int argc, char **argv) {{
 
 {chr(10).join(buffer_allocs)}
 
-{chr(10).join(launches)}
+  const int total_nodes = {len(program)};
+  int completed_nodes = 0;
+
+{chr(10).join(progress_launches)}
 
   std::vector<float> result({final_count});
   if (!check(cuMemcpyDtoH(result.data(), {final_var},
