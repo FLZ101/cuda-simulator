@@ -156,7 +156,27 @@ Reference constraints:
 
 ## Verification
 
-Not started.
+Commands run:
+
+```bash
+make resnet-gpu-cudasim
+ctest --test-dir build -R '^ptx\.(mov_pred|setp_u64)_exec_smoke$' --output-on-failure
+ctest --test-dir build -R '^models\.resnet_stem\.runner_sim$' --output-on-failure
+```
+
+Result:
+
+```text
+[model] completed 175/175 nodes (99.4%): fc
+PyTorch CPU reference matches (1000 floats)
+module simulator mode passed
+100% tests passed, 0 tests failed out of 2
+100% tests passed, 0 tests failed out of 1
+```
+
+The small-shape simulator forward pass and the relevant PTX regressions are
+green. Full `1 x 3 x 224 x 224` simulator execution and the
+`models.resnet50.runner_(cpu|sim)` CTest targets are still pending.
 
 ## Status
 
