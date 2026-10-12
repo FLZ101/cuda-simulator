@@ -1,7 +1,6 @@
 BUILD_DIR ?= build
 CMAKE_BUILD_TYPE ?= Debug
 CMAKE ?= cmake
-NINJA ?= ninja
 CTEST ?= ctest
 PYTHON ?= python3
 VENV ?= .venv
@@ -20,7 +19,7 @@ CMAKE_FLAGS := \
 	-DCUDA_SIM_ENABLE_JIT=OFF \
 	-DCUDA_SIM_ENABLE_SANITIZERS=OFF
 
-.PHONY: all build configure test run clean help install-hooks precommit format format-python venv compile_commands
+.PHONY: all build configure test run clean help precommit format format-python venv compile_commands
 
 all: build
 
@@ -70,7 +69,6 @@ help:
 	@echo "  make run        Build and run the CLI smoke executable"
 	@echo "  make compile_commands  Generate root compile_commands.json"
 	@echo "  make venv          Bootstrap .venv and install all dependencies"
-	@echo "  make install-hooks  Install pre-commit Git hooks"
 	@echo "  make precommit      Run pre-commit on all files"
 	@echo "  make format     Format C++ sources with clang-format"
 	@echo "  make format-python  Format Python sources with black from .venv"
