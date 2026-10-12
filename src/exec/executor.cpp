@@ -8,13 +8,16 @@
 #include "ptx/token.h"
 
 #include <algorithm>
+#include <atomic>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <optional>
 #include <string>
+#include <thread>
 #include <unordered_map>
 #include <utility>
 #include <vector>
@@ -2060,6 +2063,33 @@ ExecStatus execute_instruction(
   return ExecStatus::Error;
 }
 
+// Number of host threads used to run independent grid blocks in parallel.
+// Controlled by the CUDA_SIM_EXEC_THREADS environment variable:
+//   unset / "1" -> single-threaded (default)
+//   "N" > 1     -> N worker threads
+//   "auto" / "0"-> std::thread::hardware_concurrency()
+std::size_t executor_thread_count() {
+  const char *value = std::getenv("CUDA_SIM_EXEC_THREADS");
+  if (value == nullptr || *value == '\0') {
+    return 1;
+  }
+  const std::string option(value);
+  if (option == "auto") {
+    const unsigned int count = std::thread::hardware_concurrency();
+    return count == 0 ? 1 : static_cast<std::size_t>(count);
+  }
+  try {
+    const long count = std::stol(option);
+    if (count <= 0) {
+      const unsigned int hw = std::thread::hardware_concurrency();
+      return hw == 0 ? 1 : static_cast<std::size_t>(hw);
+    }
+    return static_cast<std::size_t>(count);
+  } catch (...) {
+    return 1;
+  }
+}
+
 } // namespace
 
 bool Executor::execute(const cudasim::ptx::FunctionIR &function,
@@ -2081,8 +2111,6 @@ bool Executor::execute(const cudasim::ptx::FunctionIR &function,
       shared_bytes += element_size * count;
     }
   }
-  std::vector<std::uint8_t> shared_memory(shared_bytes, 0);
-
   std::unordered_map<std::string, std::size_t> parameter_offsets;
   std::size_t offset = 0;
   for (const auto &parameter : function.parameters) {
@@ -2111,171 +2139,207 @@ bool Executor::execute(const cudasim::ptx::FunctionIR &function,
   const unsigned int grid_y = config.grid[1];
   const unsigned int grid_z = config.grid[2];
 
-  bool failed = false;
-  for (unsigned int gz = 0; gz < grid_z; ++gz) {
-    for (unsigned int gy = 0; gy < grid_y; ++gy) {
-      for (unsigned int gx = 0; gx < grid_x; ++gx) {
-        BlockInfo block;
-        block.index = {gx, gy, gz};
-        block.dim = config.block;
+  const std::size_t block_count =
+      static_cast<std::size_t>(grid_x) * grid_y * grid_z;
 
-        const std::size_t thread_count =
-            static_cast<std::size_t>(config.block[0]) * config.block[1] *
-            config.block[2];
-        const std::size_t warp_count = (thread_count + 31) / 32;
+  auto run_block = [&](unsigned int gx, unsigned int gy,
+                       unsigned int gz) -> bool {
+    BlockInfo block;
+    block.index = {gx, gy, gz};
+    block.dim = config.block;
 
-        struct WarpRuntime {
-          RegisterFile registers;
-          std::vector<bool> active;
-          std::vector<bool> blocked;
-          std::vector<std::size_t> pc;
-          bool finished = false;
-        };
+    const std::size_t thread_count = static_cast<std::size_t>(config.block[0]) *
+                                     config.block[1] * config.block[2];
+    const std::size_t warp_count = (thread_count + 31) / 32;
 
-        std::vector<WarpRuntime> warps;
-        warps.reserve(warp_count);
-        for (std::size_t warp = 0; warp < warp_count; ++warp) {
-          WarpRuntime runtime;
-          runtime.active.assign(32, false);
-          runtime.blocked.assign(32, false);
-          runtime.pc.assign(32, 0);
-          const std::size_t lane_base = warp * 32;
-          for (std::size_t lane = 0; lane < 32; ++lane) {
-            if (lane_base + lane < thread_count) {
-              runtime.active[lane] = true;
-            }
-          }
-          warps.push_back(std::move(runtime));
+    std::vector<std::uint8_t> shared_memory(shared_bytes, 0);
+
+    struct WarpRuntime {
+      RegisterFile registers;
+      std::vector<bool> active;
+      std::vector<bool> blocked;
+      std::vector<std::size_t> pc;
+      bool finished = false;
+    };
+
+    std::vector<WarpRuntime> warps;
+    warps.reserve(warp_count);
+    for (std::size_t warp = 0; warp < warp_count; ++warp) {
+      WarpRuntime runtime;
+      runtime.active.assign(32, false);
+      runtime.blocked.assign(32, false);
+      runtime.pc.assign(32, 0);
+      const std::size_t lane_base = warp * 32;
+      for (std::size_t lane = 0; lane < 32; ++lane) {
+        if (lane_base + lane < thread_count) {
+          runtime.active[lane] = true;
         }
+      }
+      warps.push_back(std::move(runtime));
+    }
 
-        bool block_running = true;
-        int arrived = 0;
-        while (block_running) {
-          bool any_unfinished = false;
-          std::size_t active_threads = 0;
-          for (const WarpRuntime &runtime : warps) {
-            if (runtime.finished) {
-              continue;
-            }
-            for (std::size_t lane = 0; lane < 32; ++lane) {
-              if (runtime.active[lane]) {
-                ++active_threads;
-              }
-            }
-          }
-
-          for (std::size_t warp = 0; warp < warps.size(); ++warp) {
-            WarpRuntime &runtime = warps[warp];
-            if (runtime.finished) {
-              continue;
-            }
-
-            bool has_active = false;
-            bool has_blocked = false;
-            const std::size_t lane_base = warp * 32;
-
-            std::vector<std::size_t> active_lanes;
-            for (std::size_t lane = 0; lane < 32; ++lane) {
-              if (runtime.blocked[lane]) {
-                has_blocked = true;
-              }
-              if (runtime.active[lane] && !runtime.blocked[lane]) {
-                active_lanes.push_back(lane);
-              }
-            }
-
-            if (!active_lanes.empty()) {
-              const std::size_t common_pc = runtime.pc[active_lanes.front()];
-              bool same_pc = true;
-              for (const std::size_t lane : active_lanes) {
-                same_pc = same_pc && runtime.pc[lane] == common_pc;
-              }
-              if (same_pc && common_pc < flat.size() &&
-                  (flat[common_pc].opcode == "ld.global.f32" ||
-                   flat[common_pc].opcode == "st.global.f32")) {
-                const bool store = flat[common_pc].opcode == "st.global.f32";
-                if (coalesced_global_f32(flat[common_pc], runtime.registers,
-                                         active_lanes, store)) {
-                  for (const std::size_t lane : active_lanes) {
-                    ++runtime.pc[lane];
-                  }
-                  any_unfinished = true;
-                  continue;
-                }
-              }
-            }
-
-            for (std::size_t lane = 0; lane < 32; ++lane) {
-              if (!runtime.active[lane] || runtime.blocked[lane]) {
-                continue;
-              }
-              has_active = true;
-              if (runtime.pc[lane] >= flat.size()) {
-                runtime.active[lane] = false;
-                continue;
-              }
-
-              const std::size_t current_pc = runtime.pc[lane];
-              if (flat[current_pc].opcode == "bar.sync") {
-                runtime.blocked[lane] = true;
-                ++arrived;
-                has_blocked = true;
-                continue;
-              }
-
-              std::size_t next_pc = current_pc + 1;
-              const ExecStatus status = execute_instruction(
-                  flat[current_pc], config, block, runtime.registers, lane,
-                  lane_base + lane, arguments, parameter_offsets, shared_memory,
-                  shared_offsets, next_pc, current_pc, labels);
-              runtime.pc[lane] = next_pc;
-              if (status == ExecStatus::Exit) {
-                runtime.active[lane] = false;
-              } else if (status == ExecStatus::Error) {
-                std::fprintf(
-                    stderr,
-                    "simulator: unsupported or invalid PTX instruction: %s\n",
-                    flat[current_pc].opcode.c_str());
-                failed = true;
-                goto done;
-              }
-            }
-
-            if (has_blocked) {
-              any_unfinished = true;
-            } else if (has_active) {
-              any_unfinished = true;
-            } else {
-              runtime.finished = true;
-            }
-          }
-
-          if (arrived > 0 && arrived == static_cast<int>(active_threads)) {
-            for (WarpRuntime &runtime : warps) {
-              for (std::size_t lane = 0; lane < 32; ++lane) {
-                if (runtime.blocked[lane]) {
-                  ++runtime.pc[lane];
-                  runtime.blocked[lane] = false;
-                }
-              }
-            }
-            arrived = 0;
-          }
-
-          if (arrived > 0) {
-            any_unfinished = true;
-          }
-
-          if (!any_unfinished && arrived == 0) {
-            block_running = false;
+    bool block_running = true;
+    int arrived = 0;
+    while (block_running) {
+      bool any_unfinished = false;
+      std::size_t active_threads = 0;
+      for (const WarpRuntime &runtime : warps) {
+        if (runtime.finished) {
+          continue;
+        }
+        for (std::size_t lane = 0; lane < 32; ++lane) {
+          if (runtime.active[lane]) {
+            ++active_threads;
           }
         }
       }
+
+      for (std::size_t warp = 0; warp < warps.size(); ++warp) {
+        WarpRuntime &runtime = warps[warp];
+        if (runtime.finished) {
+          continue;
+        }
+
+        bool has_active = false;
+        bool has_blocked = false;
+        const std::size_t lane_base = warp * 32;
+
+        std::vector<std::size_t> active_lanes;
+        for (std::size_t lane = 0; lane < 32; ++lane) {
+          if (runtime.blocked[lane]) {
+            has_blocked = true;
+          }
+          if (runtime.active[lane] && !runtime.blocked[lane]) {
+            active_lanes.push_back(lane);
+          }
+        }
+
+        if (!active_lanes.empty()) {
+          const std::size_t common_pc = runtime.pc[active_lanes.front()];
+          bool same_pc = true;
+          for (const std::size_t lane : active_lanes) {
+            same_pc = same_pc && runtime.pc[lane] == common_pc;
+          }
+          if (same_pc && common_pc < flat.size() &&
+              (flat[common_pc].opcode == "ld.global.f32" ||
+               flat[common_pc].opcode == "st.global.f32")) {
+            const bool store = flat[common_pc].opcode == "st.global.f32";
+            if (coalesced_global_f32(flat[common_pc], runtime.registers,
+                                     active_lanes, store)) {
+              for (const std::size_t lane : active_lanes) {
+                ++runtime.pc[lane];
+              }
+              any_unfinished = true;
+              continue;
+            }
+          }
+        }
+
+        for (std::size_t lane = 0; lane < 32; ++lane) {
+          if (!runtime.active[lane] || runtime.blocked[lane]) {
+            continue;
+          }
+          has_active = true;
+          if (runtime.pc[lane] >= flat.size()) {
+            runtime.active[lane] = false;
+            continue;
+          }
+
+          const std::size_t current_pc = runtime.pc[lane];
+          if (flat[current_pc].opcode == "bar.sync") {
+            runtime.blocked[lane] = true;
+            ++arrived;
+            has_blocked = true;
+            continue;
+          }
+
+          std::size_t next_pc = current_pc + 1;
+          const ExecStatus status = execute_instruction(
+              flat[current_pc], config, block, runtime.registers, lane,
+              lane_base + lane, arguments, parameter_offsets, shared_memory,
+              shared_offsets, next_pc, current_pc, labels);
+          runtime.pc[lane] = next_pc;
+          if (status == ExecStatus::Exit) {
+            runtime.active[lane] = false;
+          } else if (status == ExecStatus::Error) {
+            std::fprintf(
+                stderr,
+                "simulator: unsupported or invalid PTX instruction: %s\n",
+                flat[current_pc].opcode.c_str());
+            return false;
+          }
+        }
+
+        if (has_blocked) {
+          any_unfinished = true;
+        } else if (has_active) {
+          any_unfinished = true;
+        } else {
+          runtime.finished = true;
+        }
+      }
+
+      if (arrived > 0 && arrived == static_cast<int>(active_threads)) {
+        for (WarpRuntime &runtime : warps) {
+          for (std::size_t lane = 0; lane < 32; ++lane) {
+            if (runtime.blocked[lane]) {
+              ++runtime.pc[lane];
+              runtime.blocked[lane] = false;
+            }
+          }
+        }
+        arrived = 0;
+      }
+
+      if (arrived > 0) {
+        any_unfinished = true;
+      }
+
+      if (!any_unfinished && arrived == 0) {
+        block_running = false;
+      }
+    }
+
+    return true;
+  };
+
+  const std::size_t thread_limit = executor_thread_count();
+  std::atomic<bool> failed{false};
+
+  auto run_range = [&](std::size_t begin, std::size_t end) {
+    for (std::size_t i = begin;
+         i < end && !failed.load(std::memory_order_relaxed); ++i) {
+      const unsigned int gx = static_cast<unsigned int>(i % grid_x);
+      const unsigned int gy = static_cast<unsigned int>((i / grid_x) % grid_y);
+      const unsigned int gz = static_cast<unsigned int>(i / (grid_x * grid_y));
+      if (!run_block(gx, gy, gz)) {
+        failed.store(true, std::memory_order_relaxed);
+        return;
+      }
+    }
+  };
+
+  const std::size_t worker_count = std::min(thread_limit, block_count);
+  if (worker_count <= 1) {
+    run_range(0, block_count);
+  } else {
+    std::vector<std::thread> workers;
+    workers.reserve(worker_count);
+    const std::size_t base = block_count / worker_count;
+    const std::size_t remainder = block_count % worker_count;
+    std::size_t begin = 0;
+    for (std::size_t t = 0; t < worker_count; ++t) {
+      const std::size_t chunk = base + (t < remainder ? 1 : 0);
+      const std::size_t end = begin + chunk;
+      workers.emplace_back(run_range, begin, end);
+      begin = end;
+    }
+    for (std::thread &worker : workers) {
+      worker.join();
     }
   }
 
-done:
-  return !failed;
+  return !failed.load(std::memory_order_relaxed);
 }
 
 } // namespace cudasim::exec
