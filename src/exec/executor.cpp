@@ -1032,6 +1032,31 @@ ExecStatus execute_instruction(
     return ExecStatus::Continue;
   }
 
+  if (opcode == "mul.hi.s32" || opcode == "mul.hi.u32") {
+    std::size_t pos = 0;
+    auto dst = parse_register(instruction.operand_tokens, pos);
+    auto a =
+        parse_u32_operand(instruction.operand_tokens, pos, registers, lane);
+    auto b =
+        parse_u32_operand(instruction.operand_tokens, pos, registers, lane);
+    if (!dst || !a || !b) {
+      return ExecStatus::Error;
+    }
+    const bool is_signed = opcode == "mul.hi.s32";
+    const std::uint64_t av =
+        is_signed ? static_cast<std::uint64_t>(static_cast<std::int64_t>(
+                        static_cast<std::int32_t>(*a)))
+                  : static_cast<std::uint64_t>(*a);
+    const std::uint64_t bv =
+        is_signed ? static_cast<std::uint64_t>(static_cast<std::int64_t>(
+                        static_cast<std::int32_t>(*b)))
+                  : static_cast<std::uint64_t>(*b);
+    registers.values[dst->index][lane] =
+        static_cast<std::uint32_t>((av * bv) >> 32);
+    next_pc = pc + 1;
+    return ExecStatus::Continue;
+  }
+
   if (opcode == "mad.wide.s32" || opcode == "mad.wide.u32") {
     std::size_t pos = 0;
     auto dst = parse_register(instruction.operand_tokens, pos);

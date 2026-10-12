@@ -21,6 +21,7 @@ def main() -> int:
     parser.add_argument("--reference", required=True)
     parser.add_argument("--rtol", type=float, default=1e-4)
     parser.add_argument("--atol", type=float, default=1e-5)
+    parser.add_argument("--check-argmax", action="store_true")
     args = parser.parse_args()
 
     reference = torch.load(args.reference, weights_only=False)
@@ -39,7 +40,17 @@ def main() -> int:
             f"rtol={args.rtol:.1e} atol={args.atol:.1e}"
         )
 
-    print(f"PyTorch CPU reference matches ({actual.numel()} floats)")
+    summary = f"PyTorch CPU reference matches ({actual.numel()} floats)"
+    if args.check_argmax:
+        expected_argmax = int(expected.argmax().item())
+        actual_argmax = int(actual.argmax().item())
+        if actual_argmax != expected_argmax:
+            raise AssertionError(
+                "predicted token mismatch: "
+                f"reference argmax={expected_argmax}, simulator argmax={actual_argmax}"
+            )
+        summary += f"; argmax matches ({actual_argmax})"
+    print(summary)
     return 0
 
 

@@ -636,9 +636,11 @@ Current status:
   `steps/STEP_08.md`.
 - Step 9 is in progress in `steps/STEP_09.md`; the small-shape ResNet-50
   simulator forward pass is green.
-- Step 10 is in progress in `steps/STEP_10.md`; embedding, single-head
-  attention, multi-head attention, and one GPT-2 transformer block checkpoints
-  are green, with the full stack and LM head still to lower.
+- Step 10 is in progress in `steps/STEP_10.md`; embedding, causal attention,
+  transformer-block, and a full pretrained GPT-2 stack with position embeddings
+  and LM head are green. The 124M/12-block PyTorch CPU reference and native-GPU
+  runner match with argmax comparison; the full 12-block interpreter gate
+  remains a long-running manual target.
 - Step 8's `nvcc` operator execution qualification is implemented and green:
   generated kernels are grouped into operator families and tested through one
   CTest target per group with the real GPU as golden reference, including
@@ -1213,7 +1215,8 @@ context_length = 1024
 
 Runner contract:
 
-- load deterministic weights and token IDs
+- load the cached Hugging Face `gpt2` 124M pretrained weights and deterministic
+  token IDs
 - launch embedding, attention, MLP, layer norm, residual, and LM-head kernels
 - copy final logits to host
 - write output
@@ -1223,7 +1226,7 @@ All operators are explicit PTX. No cuBLAS/cuDNN/cuFFT.
 Reference:
 
 ```text
-Hugging Face gpt2 or minimal equivalent
+Hugging Face gpt2 pretrained weights mapped into the traced custom GPT-2 stack
 model.eval()
 token_ids = deterministic sequence
 ```

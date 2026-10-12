@@ -21,6 +21,9 @@ def main() -> int:
     parser.add_argument("--output-dir", required=True)
     parser.add_argument("--simulate", action="store_true")
     parser.add_argument("--compare", action="store_true")
+    parser.add_argument("--check-argmax", action="store_true")
+    parser.add_argument("--rtol", type=float, default=1e-4)
+    parser.add_argument("--atol", type=float, default=1e-5)
     known, _ = parser.parse_known_args()
 
     try:
@@ -47,17 +50,21 @@ def main() -> int:
     subprocess.run(command, check=True, env=env)
 
     if parsed.compare:
-        subprocess.run(
-            [
-                sys.executable,
-                str(pathlib.Path(__file__).resolve().parent / "compare_torch_reference.py"),
-                "--simulator-output",
-                str(output_dir / "gpu_output.bin"),
-                "--reference",
-                str(output_dir / "reference.pt"),
-            ],
-            check=True,
-        )
+        compare_command = [
+            sys.executable,
+            str(pathlib.Path(__file__).resolve().parent / "compare_torch_reference.py"),
+            "--simulator-output",
+            str(output_dir / "gpu_output.bin"),
+            "--reference",
+            str(output_dir / "reference.pt"),
+            "--rtol",
+            str(parsed.rtol),
+            "--atol",
+            str(parsed.atol),
+        ]
+        if parsed.check_argmax:
+            compare_command.append("--check-argmax")
+        subprocess.run(compare_command, check=True)
 
     mode_name = "simulator" if parsed.simulate else "gpu"
     print(f"{parsed.spec} {mode_name} mode passed")

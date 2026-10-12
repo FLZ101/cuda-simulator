@@ -15,15 +15,24 @@ from ._common import compile_kernel, runner_prelude, write_floats
 
 
 @triton.jit
-def linear_kernel(x_ptr, w_ptr, b_ptr, out_ptr, m, n, k: tl.constexpr):
+def linear_kernel(
+    x_ptr,
+    w_ptr,
+    b_ptr,
+    out_ptr,
+    n,
+    k: tl.constexpr,
+    BLOCK_N: tl.constexpr,
+):
     row = tl.program_id(0)
-    col = tl.program_id(1)
-    acc = tl.load(b_ptr + col)
+    col = tl.program_id(1) * BLOCK_N + tl.arange(0, BLOCK_N)
+    mask = col < n
+    acc = tl.load(b_ptr + col, mask=mask, other=0.0)
     for kk in tl.range(0, k):
         x = tl.load(x_ptr + row * k + kk)
-        w = tl.load(w_ptr + col * k + kk)
+        w = tl.load(w_ptr + col * k + kk, mask=mask, other=0.0)
         acc += x * w
-    tl.store(out_ptr + row * n + col, acc)
+    tl.store(out_ptr + row * n + col, acc, mask=mask)
 
 
 @triton.jit
@@ -202,6 +211,9 @@ def activation_kernel(
         y = tl.minimum(tl.maximum(x, -1.0), 1.0)
     elif mode == 14:
         y = x / (1.0 + tl.abs(x))
+    elif mode == 16:
+        z = 0.7978845608028654 * (x + 0.044715 * x * x * x)
+        y = x * tl.sigmoid(2.0 * z)
     else:
         y = -tl.log(1.0 + tl.exp(-x))
     tl.store(out_ptr + offsets, y, mask=mask)
@@ -460,10 +472,20 @@ def multihead_attention_kernel(
     tl.store(out_ptr + pid, result)
 
 
+@triton.jit
+def arange_kernel(out_ptr, n, start, BLOCK: tl.constexpr):
+    pid = tl.program_id(0)
+    offsets = pid * BLOCK + tl.arange(0, BLOCK)
+    mask = offsets < n
+    tl.store(out_ptr + offsets, start + offsets, mask=mask)
+
+
 def add_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--module-file", required=True)
+    parser.add_argument("--pretrained", action="store_true")
     parser.add_argument("--head-dim", type=int, default=16)
     parser.add_argument("--num-heads", type=int, default=2)
+    parser.add_argument("--n-layer", type=int, default=2)
     parser.add_argument("--seq-len", type=int, default=8)
     parser.add_argument("--vocab-size", type=int, default=32)
     parser.add_argument("--embedding-dim", type=int, default=16)
@@ -647,11 +669,17 @@ def _multihead_attention_target(node):
     )
 
 
+def _position_ids_target(node):
+    return node.op == "call_function" and getattr(node.target, "__name__", "") == "position_ids"
+
+
 def _activation_mode(module):
     if isinstance(module, torch.nn.GELU):
-        if not module.approximate == "none":
-            raise RuntimeError("only exact GELU is supported")
-        return 0, 0.0
+        if module.approximate == "none":
+            return 0, 0.0
+        if module.approximate == "tanh":
+            return 16, 0.0
+        raise RuntimeError(f"unsupported GELU approximation: {module.approximate}")
     if isinstance(module, torch.nn.SiLU):
         return 1, 0.0
     if isinstance(module, torch.nn.Sigmoid):
@@ -918,6 +946,14 @@ def _shape_map(traced, example_input):
                 shapes[node.name] = input_shape
             else:
                 raise RuntimeError(f"unsupported module in traced graph: {type(module).__name__}")
+        elif _position_ids_target(node):
+            if (
+                len(node.args) < 2
+                or not isinstance(node.args[0], torch.fx.Node)
+                or not isinstance(node.args[1], int)
+            ):
+                raise RuntimeError("position_ids requires token_ids and a static sequence length")
+            shapes[node.name] = [node.args[1]]
         elif _multihead_attention_target(node):
             if len(node.args) < 5:
                 raise RuntimeError(
@@ -1043,6 +1079,17 @@ def _graph_program(traced, shapes):
                     "kind": "matmul",
                     "name": node.name,
                     "inputs": (left_name, right_name),
+                    "shape": shapes[node.name],
+                }
+            )
+            continue
+        if _position_ids_target(node):
+            length = node.args[1]
+            program.append(
+                {
+                    "kind": "arange",
+                    "name": node.name,
+                    "length": length,
                     "shape": shapes[node.name],
                 }
             )
@@ -1500,6 +1547,10 @@ def _multihead_attention_index(multihead_attentions, op):
     return next(index for index, candidate in enumerate(multihead_attentions) if candidate is op)
 
 
+def _arange_index(aranges, op):
+    return next(index for index, candidate in enumerate(aranges) if candidate is op)
+
+
 def _weighted_index(weighted_ops, op):
     return next(index for index, candidate in enumerate(weighted_ops) if candidate is op)
 
@@ -1535,6 +1586,7 @@ def generate_native_runner(args: argparse.Namespace, output_path: pathlib.Path) 
     softmaxes = [op for op in program if op["kind"] == "softmax"]
     causal_softmaxes = [op for op in program if op["kind"] == "causal_softmax"]
     multihead_attentions = [op for op in program if op["kind"] == "multihead_attention"]
+    aranges = [op for op in program if op["kind"] == "arange"]
     weighted = [op for op in program if op["kind"] in ("linear", "conv2d")]
 
     ptx_by_key = {}
@@ -1546,11 +1598,12 @@ def generate_native_runner(args: argparse.Namespace, output_path: pathlib.Path) 
         w = torch.randn(n, k, device="cuda", dtype=torch.float32)
         b = torch.randn(n, device="cuda", dtype=torch.float32)
         out = torch.empty(m, n, device="cuda", dtype=torch.float32)
+        block_n = 32
         ptx = compile_kernel(
             linear_kernel,
-            (m, n),
-            (x, w, b, out, m, n),
-            {"k": k, "num_warps": 1},
+            (m, (n + block_n - 1) // block_n),
+            (x, w, b, out, n),
+            {"k": k, "BLOCK_N": block_n, "num_warps": 1},
         ).replace("linear_kernel", f"linear_{index}_kernel")
         ptx_by_key[f"linear_{index}"] = ptx
 
@@ -1875,6 +1928,17 @@ def generate_native_runner(args: argparse.Namespace, output_path: pathlib.Path) 
         ).replace("multihead_attention_kernel", f"multihead_attention_{index}_kernel")
         ptx_by_key[f"multihead_attention_{index}"] = ptx
 
+    for index, op in enumerate(aranges):
+        count = op["length"]
+        out = torch.empty(count, device="cuda", dtype=torch.float32)
+        ptx = compile_kernel(
+            arange_kernel,
+            (1,),
+            (out, count, 0),
+            {"BLOCK": args.block, "num_warps": 1},
+        ).replace("arange_kernel", f"arange_{index}_kernel")
+        ptx_by_key[f"arange_{index}"] = ptx
+
     output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_text(
         _generate_cpp(
@@ -1900,6 +1964,7 @@ def generate_native_runner(args: argparse.Namespace, output_path: pathlib.Path) 
             softmaxes,
             causal_softmaxes,
             multihead_attentions,
+            aranges,
             weighted,
             shapes,
             ptx_by_key,
@@ -1930,6 +1995,7 @@ def _generate_cpp(
     softmaxes,
     causal_softmaxes,
     multihead_attentions,
+    aranges,
     weighted,
     shapes,
     ptx_by_key,
@@ -2004,6 +2070,9 @@ def _generate_cpp(
             f"""  CUfunction multihead_attention{index}_fn = load_function(
       R"CUPTX({ptx_by_key[f"multihead_attention_{index}"]})CUPTX", "multihead_attention_{index}_kernel");"""
         )
+    for index, _ in enumerate(aranges):
+        function_loads.append(f"""  CUfunction arange{index}_fn = load_function(
+      R"CUPTX({ptx_by_key[f"arange_{index}"]})CUPTX", "arange_{index}_kernel");""")
     declarations = "\n".join(function_loads)
     check_functions = (
         " || ".join(
@@ -2026,6 +2095,7 @@ def _generate_cpp(
             + [f"!softmax{index}_fn" for index in range(len(softmaxes))]
             + [f"!causal_softmax{index}_fn" for index in range(len(causal_softmaxes))]
             + [f"!multihead_attention{index}_fn" for index in range(len(multihead_attentions))]
+            + [f"!arange{index}_fn" for index in range(len(aranges))]
         )
         or "false"
     )
@@ -2236,6 +2306,14 @@ def _generate_cpp(
   }}"""
             )
             continue
+        if op["kind"] == "arange":
+            arange_index = _arange_index(aranges, op)
+            count = op["length"]
+            launches.append(f"""  if (!launch_arange(arange{arange_index}_fn,
+                      {output_var}, {count}, 0, {args.block})) {{
+    return 26;
+  }}""")
+            continue
         input_var = "d_input" if op["input"] == placeholder.name else _buffer_name(op["input"])
         if op["kind"] == "linear":
             linear_index = _linear_index(linears, op)
@@ -2377,9 +2455,10 @@ def _generate_cpp(
                    CUdeviceptr b, CUdeviceptr out, int m, int n) {
   CUdeviceptr scratch = 0;
   CUdeviceptr profile_scratch = 0;
-  void *params[] = {&x, &w, &b, &out, &m, &n, &scratch, &profile_scratch};
-  return check(cuLaunchKernel(function, static_cast<unsigned int>(m),
-                              static_cast<unsigned int>(n), 1, 32, 1, 1, 0,
+  void *params[] = {&x, &w, &b, &out, &n, &scratch, &profile_scratch};
+  const unsigned int grid_n = (n + 31) / 32;
+  return check(cuLaunchKernel(function, static_cast<unsigned int>(m), grid_n,
+                              1, 32, 1, 1, 0,
                               nullptr, params, nullptr));
 }"""
         )
@@ -2551,17 +2630,28 @@ def _generate_cpp(
   return check(cuLaunchKernel(function, static_cast<unsigned int>(count), 1, 1,
                               32, 1, 1, 0, nullptr, params, nullptr));
 }""")
+    if aranges:
+        launch_helpers.append("""bool launch_arange(CUfunction function, CUdeviceptr out,
+                    int count, int start, int block) {
+  CUdeviceptr scratch = 0;
+  CUdeviceptr profile_scratch = 0;
+  void *params[] = {&out, &start, &scratch, &profile_scratch};
+  const unsigned int grid =
+      (static_cast<unsigned int>(count) + static_cast<unsigned int>(block) - 1) /
+      static_cast<unsigned int>(block);
+  return check(cuLaunchKernel(function, grid, 1, 1,
+                              static_cast<unsigned int>(block), 1, 1, 0,
+                              nullptr, params, nullptr));
+}""")
     launch_helpers_text = "\n".join(launch_helpers)
 
     progress_launches = []
     for index, launch in enumerate(launches):
         node_name = program[index]["name"]
-        progress_launches.append(
-            launch
-            + f"""\n  std::fprintf(stderr, "[model] completed %d/%d nodes (%.1f%%): {node_name}\\n",
-               ++completed_nodes, total_nodes,
-               100.0 * static_cast<double>(completed_nodes) / total_nodes);"""
-        )
+        progress_launches.append(launch + f"""\n  ++completed_nodes;
+  std::fprintf(stderr, "[model] completed %d/%d nodes (%.1f%%): {node_name}\\n",
+               completed_nodes, total_nodes,
+               100.0 * static_cast<double>(completed_nodes) / total_nodes);""")
 
     source = runner_prelude() + f"""
 {launch_helpers_text}

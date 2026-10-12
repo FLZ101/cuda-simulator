@@ -34,12 +34,13 @@ PTX only (never CUBIN/SASS). v1 correctness targets:
   (`tests/models/specs/_common.py`) generates the C++ from a `Runner`
   description. `vector_add`, `matmul`, and `mlp` are declarative `build_runner`
   specs; `module.py` is the generic FX-traced converter.
-- **Step 10 checkpoints 1-4**: `tests/models/specs/module.py` now lowers
-  traced `nn.Embedding`, `causal_softmax`, and wrapped `multihead_attention`
-  calls to SIMT PTX kernels, and a full GPT-2 transformer block runs through
-  the traced model flow. The new `models.gpt2_embedding`,
-  `models.gpt2_attention`, `models.gpt2_multihead`, and `models.gpt2_block`
-  CPU/sim tests pass.
+- **Step 10 checkpoints 1-5**: `tests/models/specs/module.py` now lowers
+  traced `nn.Embedding`, `causal_softmax`, wrapped `multihead_attention`, and
+  `position_ids`/`arange` calls to SIMT PTX kernels. The full GPT-2 stack uses
+  the cached Hugging Face `gpt2` pretrained weights mapped into the traced
+  custom stack. The full 124M/12-block pretrained CPU reference and native-GPU
+  runner pass with argmax comparison; a pretrained zero-layer simulator probe
+  keeps the default CTest simulator gate bounded.
 
 ## Where Things Live
 
@@ -78,13 +79,15 @@ PTX only (never CUBIN/SASS). v1 correctness targets:
   `mov.b32/u32` with `0fXXXXXXXX` hex-float immediates.
 - Triton 3.8 ABI: kernels take two trailing hidden scratch pointers
   (`global_scratch`, `profile_scratch`); the generator passes both.
+- `mul.hi.s32`/`mul.hi.u32` execute the high 32 bits of the 64-bit signed or
+  unsigned product, used by Triton's constant-division sequence.
 
 ## Tasks / Next Steps
 
 1. Replace the fixed 1024-per-bank register banks with a
    `.reg`-declaration-driven `RegisterLayout` once a generated kernel exceeds
    current capacity.
-2. Continue extending the model-runner converter for the full GPT-2 stack and
-   LM head. Token embedding, causal attention, and one transformer block
-   lowering are complete.
+2. Finish the full 124M/12-block interpreter gate once throughput improves;
+   the pretrained CPU reference, real-GPU comparison, argmax check, and
+   zero-layer simulator probe are already green.
 3. Add missing PTX semantics as newly generated kernels expose them.

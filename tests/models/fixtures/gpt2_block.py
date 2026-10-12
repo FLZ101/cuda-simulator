@@ -36,10 +36,10 @@ def multihead_attention(query, key, value, num_heads, head_dim):
 class MultiHeadAttention(torch.nn.Module):
     def __init__(self, embedding_dim, num_heads, head_dim):
         super().__init__()
-        self.q_proj = torch.nn.Linear(embedding_dim, embedding_dim, bias=False)
-        self.k_proj = torch.nn.Linear(embedding_dim, embedding_dim, bias=False)
-        self.v_proj = torch.nn.Linear(embedding_dim, embedding_dim, bias=False)
-        self.out_proj = torch.nn.Linear(embedding_dim, embedding_dim, bias=False)
+        self.q_proj = torch.nn.Linear(embedding_dim, embedding_dim)
+        self.k_proj = torch.nn.Linear(embedding_dim, embedding_dim)
+        self.v_proj = torch.nn.Linear(embedding_dim, embedding_dim)
+        self.out_proj = torch.nn.Linear(embedding_dim, embedding_dim)
 
     def forward(self, x):
         query = self.q_proj(x)
@@ -63,9 +63,9 @@ class GPT2Block(torch.nn.Module):
         self.attention = MultiHeadAttention(embedding_dim, num_heads, head_dim)
         self.ln_2 = torch.nn.LayerNorm(embedding_dim, eps=1e-5)
         self.mlp = torch.nn.Sequential(
-            torch.nn.Linear(embedding_dim, hidden_dim, bias=False),
-            torch.nn.GELU(),
-            torch.nn.Linear(hidden_dim, embedding_dim, bias=False),
+            torch.nn.Linear(embedding_dim, hidden_dim),
+            torch.nn.GELU(approximate="tanh"),
+            torch.nn.Linear(hidden_dim, embedding_dim),
         )
 
     def forward(self, x):

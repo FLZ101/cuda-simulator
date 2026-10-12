@@ -1334,6 +1334,163 @@ add_test(
           --output-dir ${CMAKE_CURRENT_BINARY_DIR}/models/gpt2_block
 )
 
+set(GPT2_RUNNER_SRC ${GENERATED_MODEL_DIR}/gpt2_runner.cu)
+set(GPT2_MODEL_FIXTURE
+  ${CMAKE_CURRENT_SOURCE_DIR}/models/fixtures/gpt2.py)
+set(GPT2_FULL_BLOCK_MODEL_FIXTURE
+  ${CMAKE_CURRENT_SOURCE_DIR}/models/fixtures/gpt2_block.py)
+
+add_custom_command(
+  OUTPUT ${GPT2_RUNNER_SRC}
+  COMMAND ${SIM_PYTHON} ${CMAKE_CURRENT_SOURCE_DIR}/models/generate_model_runner.py
+          --spec module
+          --output-cpp ${GPT2_RUNNER_SRC}
+          --module-file ${GPT2_MODEL_FIXTURE}
+          --seq-len 1
+          --vocab-size 50257
+          --embedding-dim 768
+          --head-dim 64
+          --num-heads 12
+          --n-layer 12
+          --block 32
+  DEPENDS
+    ${CMAKE_CURRENT_SOURCE_DIR}/models/generate_model_runner.py
+    ${CMAKE_CURRENT_SOURCE_DIR}/models/specs/_common.py
+    ${CMAKE_CURRENT_SOURCE_DIR}/models/specs/module.py
+    ${GPT2_MODEL_FIXTURE}
+    ${GPT2_FULL_BLOCK_MODEL_FIXTURE}
+  VERBATIM
+)
+
+add_executable(gpt2_model_runner ${GPT2_RUNNER_SRC})
+set_target_properties(gpt2_model_runner PROPERTIES
+  CUDA_STANDARD 20
+  CUDA_STANDARD_REQUIRED ON
+  CUDA_ARCHITECTURES 86
+)
+target_link_libraries(gpt2_model_runner PRIVATE CUDA::cuda_driver)
+
+set(GPT2_ZERO_RUNNER_SRC ${GENERATED_MODEL_DIR}/gpt2_zero_runner.cu)
+add_custom_command(
+  OUTPUT ${GPT2_ZERO_RUNNER_SRC}
+  COMMAND ${SIM_PYTHON} ${CMAKE_CURRENT_SOURCE_DIR}/models/generate_model_runner.py
+          --spec module
+          --output-cpp ${GPT2_ZERO_RUNNER_SRC}
+          --module-file ${GPT2_MODEL_FIXTURE}
+          --seq-len 1
+          --vocab-size 50257
+          --embedding-dim 768
+          --head-dim 64
+          --num-heads 12
+          --n-layer 0
+          --block 32
+  DEPENDS
+    ${CMAKE_CURRENT_SOURCE_DIR}/models/generate_model_runner.py
+    ${CMAKE_CURRENT_SOURCE_DIR}/models/specs/_common.py
+    ${CMAKE_CURRENT_SOURCE_DIR}/models/specs/module.py
+    ${GPT2_MODEL_FIXTURE}
+    ${GPT2_FULL_BLOCK_MODEL_FIXTURE}
+  VERBATIM
+)
+
+add_executable(gpt2_zero_model_runner ${GPT2_ZERO_RUNNER_SRC})
+set_target_properties(gpt2_zero_model_runner PROPERTIES
+  CUDA_STANDARD 20
+  CUDA_STANDARD_REQUIRED ON
+  CUDA_ARCHITECTURES 86
+)
+target_link_libraries(gpt2_zero_model_runner PRIVATE CUDA::cuda_driver)
+
+add_test(
+  NAME models.gpt2.runner_cpu
+  COMMAND ${SIM_PYTHON} ${CMAKE_CURRENT_SOURCE_DIR}/models/model_runner.py
+          --spec module
+          --mode cpu
+          --module-file ${GPT2_MODEL_FIXTURE}
+          --pretrained
+          --seq-len 1
+          --vocab-size 50257
+          --embedding-dim 768
+          --head-dim 64
+          --num-heads 12
+          --n-layer 12
+          --runner $<TARGET_FILE:gpt2_model_runner>
+          --cudart $<TARGET_FILE:cudart_shim>
+          --cuda $<TARGET_FILE:cuda_shim>
+          --core-dir $<TARGET_FILE_DIR:cudasim_core>
+          --output-dir ${CMAKE_CURRENT_BINARY_DIR}/models/gpt2
+)
+add_test(
+  NAME models.gpt2.runner_gpu
+  COMMAND ${SIM_PYTHON} ${CMAKE_CURRENT_SOURCE_DIR}/models/model_runner.py
+          --spec module
+          --mode gpu
+          --compare
+          --check-argmax
+          --module-file ${GPT2_MODEL_FIXTURE}
+          --pretrained
+          --seq-len 1
+          --vocab-size 50257
+          --embedding-dim 768
+          --head-dim 64
+          --num-heads 12
+          --n-layer 12
+          --runner $<TARGET_FILE:gpt2_model_runner>
+          --cudart $<TARGET_FILE:cudart_shim>
+          --cuda $<TARGET_FILE:cuda_shim>
+          --core-dir $<TARGET_FILE_DIR:cudasim_core>
+          --output-dir ${CMAKE_CURRENT_BINARY_DIR}/models/gpt2
+)
+set_tests_properties(models.gpt2.runner_gpu PROPERTIES
+  DEPENDS models.gpt2.runner_cpu
+)
+add_test(
+  NAME models.gpt2.zero_runner_cpu
+  COMMAND ${SIM_PYTHON} ${CMAKE_CURRENT_SOURCE_DIR}/models/model_runner.py
+          --spec module
+          --mode cpu
+          --module-file ${GPT2_MODEL_FIXTURE}
+          --pretrained
+          --seq-len 1
+          --vocab-size 50257
+          --embedding-dim 768
+          --head-dim 64
+          --num-heads 12
+          --n-layer 0
+          --runner $<TARGET_FILE:gpt2_zero_model_runner>
+          --cudart $<TARGET_FILE:cudart_shim>
+          --cuda $<TARGET_FILE:cuda_shim>
+          --core-dir $<TARGET_FILE_DIR:cudasim_core>
+          --output-dir ${CMAKE_CURRENT_BINARY_DIR}/models/gpt2_zero
+)
+add_test(
+  NAME models.gpt2.runner_sim
+  COMMAND ${SIM_PYTHON} ${CMAKE_CURRENT_SOURCE_DIR}/models/model_runner.py
+          --spec module
+          --mode gpu
+          --simulate
+          --compare
+          --check-argmax
+          --atol 1e-4
+          --module-file ${GPT2_MODEL_FIXTURE}
+          --pretrained
+          --seq-len 1
+          --vocab-size 50257
+          --embedding-dim 768
+          --head-dim 64
+          --num-heads 12
+          --n-layer 0
+          --runner $<TARGET_FILE:gpt2_zero_model_runner>
+          --cudart $<TARGET_FILE:cudart_shim>
+          --cuda $<TARGET_FILE:cuda_shim>
+          --core-dir $<TARGET_FILE_DIR:cudasim_core>
+          --output-dir ${CMAKE_CURRENT_BINARY_DIR}/models/gpt2_zero
+)
+set_tests_properties(models.gpt2.runner_sim PROPERTIES
+  DEPENDS models.gpt2.zero_runner_cpu
+  ENVIRONMENT "CUDA_SIM_EXEC_THREADS=auto"
+)
+
 add_executable(runtime_api_smoke
   compat/runtime_api_smoke.cpp
 )

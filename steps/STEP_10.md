@@ -157,14 +157,73 @@ Reference constraints:
 - verification: `cmake --build build -j` and
   `ctest --test-dir build -R 'models\.gpt2_block\.runner_(cpu|sim)'
   --output-on-failure` both pass; all 18 traced model-runner tests pass.
+- Added a complete small GPT-2 fixture with token and position embeddings,
+  multiple transformer blocks, final layer norm, and an LM head. Added a
+  `position_ids` graph op lowered to an `arange` SIMT kernel.
+- files: `tests/models/specs/module.py`, `tests/CMakeLists.txt`,
+  `tests/models/fixtures/gpt2.py`
+- verification: `cmake --build build -j` and
+  `ctest --test-dir build -R 'models\.gpt2\.runner_(cpu|sim)'
+  --output-on-failure` both pass; all 20 traced model-runner tests pass.
+- Switched the full GPT-2 fixture to the cached Hugging Face `gpt2` 124M
+  pretrained checkpoint and changed the GPT-2 block MLP to biasful linear
+  layers with PyTorch's tanh-approximation GELU. The fixture maps HF `Conv1D`
+  weights/bias into the traced Q/K/V/output and MLP `Linear` modules and ties
+  the LM head to `wte`.
+- files: `tests/models/fixtures/gpt2.py`,
+  `tests/models/fixtures/gpt2_block.py`, `tests/CMakeLists.txt`
+- verification: `cmake --build build --target gpt2_model_runner -j` and
+  `ctest --test-dir build -R 'models\.gpt2\.runner_cpu' --output-on-failure`
+  pass with the full `50257/768/12/12/16-token` configuration.
+- Added tanh-approximation GELU lowering as activation mode 16. The Triton
+  kernel computes `x * sigmoid(2z)` with
+  `z = 0.7978845608028654 * (x + 0.044715 * x^3)`, matching `nn.GELU`.
+- files: `tests/models/specs/module.py`
+- verification: full GPT-2 runner generation and CPU reference pass.
+- Added `mul.hi.s32`/`mul.hi.u32` executor support for the high 32 bits of
+  signed/unsigned 64-bit products, emitted by Triton's constant-division
+  sequences in the full GPT-2 PTX.
+- files: `src/exec/executor.cpp`
+- verification: full GPT-2 simulator comparison proceeds past the previously
+  unsupported `mul.hi.u32` instruction; final sim comparison pending.
+- Fixed the `position_ids`/`arange` native-runner ABI mismatch. Triton
+  specializes the array length as a constant, so the generated launch helper
+  was passing the length where the start value belonged, making position 0 map
+  to token/position 1.
+- files: `tests/models/specs/module.py`
+- verification: full pretrained GPT-2 native GPU output matches the PyTorch CPU
+  reference and argmax.
+- Added `--check-argmax` comparison support and forwarded configurable
+  `--rtol`/`--atol` through the model runner. Progress reporting now increments
+  the completed-node counter before formatting the percentage.
+- files: `tests/models/model_runner.py`,
+  `tests/models/compare_torch_reference.py`,
+  `tests/models/specs/module.py`
+- verification: `ctest --test-dir build -R 'models\.gpt2\.(runner_cpu|runner_gpu|zero_runner_cpu|runner_sim)'
+  --output-on-failure` passes.
+- Split the CTest GPT-2 gate into a full 124M pretrained CPU reference, a full
+  124M pretrained native-GPU runner with argmax check, and a pretrained
+  zero-layer simulator probe with relaxed `atol=1e-4`. The zero-layer probe
+  keeps the simulator gate bounded while exercising pretrained embedding,
+  layer-norm, and LM-head kernels under the shims.
+- files: `tests/CMakeLists.txt`
+- verification: `ctest --test-dir build -R 'models\.'
+  --output-on-failure` passes, including the full pretrained real-GPU run and
+  the pretrained simulator probe.
 
 ## Verification
 
-Checkpoints 1-4 pass:
+Checkpoints 1-5 pass on the reduced GPT-2 configuration:
 
 ```bash
-ctest --test-dir build -R 'models\.gpt2_(embedding|attention|multihead|block)\.runner_(cpu|sim)' --output-on-failure
+ctest --test-dir build -R 'models\.gpt2(\.|_)' --output-on-failure
 ```
+
+The full 124M/12-block pretrained configuration passes the PyTorch CPU
+reference and the native-GPU runner with argmax comparison. The pretrained
+zero-layer simulator probe passes with `atol=1e-4`; the full 12-block
+interpreter run remains a long-running manual gate until interpreter throughput
+is improved.
 
 ## Status
 

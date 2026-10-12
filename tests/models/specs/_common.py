@@ -14,7 +14,13 @@ def strip_debug_sections(ptx: str) -> str:
     for marker in ("\n\t.file", "\n\t.section"):
         if marker in ptx:
             ptx = ptx.partition(marker)[0]
-    return ptx.rstrip() + "\n"
+    lines = []
+    for line in ptx.splitlines():
+        stripped = line.strip()
+        if stripped.startswith(".loc") or stripped.startswith(".file"):
+            continue
+        lines.append(line)
+    return "\n".join(lines).rstrip() + "\n"
 
 
 def write_floats(path: pathlib.Path, values: torch.Tensor) -> None:
@@ -89,11 +95,17 @@ CUdeviceptr allocate_and_copy(const void *data, std::size_t bytes) {
 
 CUfunction load_function(const char *ptx, const char *name) {
   CUmodule module = nullptr;
-  if (!check(cuModuleLoadData(&module, ptx))) {
+  const CUresult load_result = cuModuleLoadData(&module, ptx);
+  if (load_result != CUDA_SUCCESS) {
+    std::fprintf(stderr, "cuModuleLoadData failed for kernel %s: %d\\n",
+                 name, static_cast<int>(load_result));
     return nullptr;
   }
   CUfunction function = nullptr;
-  if (!check(cuModuleGetFunction(&function, module, name))) {
+  const CUresult get_result = cuModuleGetFunction(&function, module, name);
+  if (get_result != CUDA_SUCCESS) {
+    std::fprintf(stderr, "cuModuleGetFunction failed for kernel %s: %d\\n",
+                 name, static_cast<int>(get_result));
     return nullptr;
   }
   return function;
