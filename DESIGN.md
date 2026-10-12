@@ -634,8 +634,10 @@ Current status:
 
 - Steps 0 through 8 are implemented and recorded in `steps/STEP_00.md` through
   `steps/STEP_08.md`.
-- Step 9 is planned in `steps/STEP_09.md`; work is starting on the ResNet-50
-  end-to-end runner.
+- Step 9 is in progress in `steps/STEP_09.md`; the small-shape ResNet-50
+  simulator forward pass is green.
+- Step 10 is in progress in `steps/STEP_10.md`; the GPT-2 embedding lookup
+  checkpoint is green, with remaining GPT-2 graph operators still to lower.
 - Step 8's `nvcc` operator execution qualification is implemented and green:
   generated kernels are grouped into operator families and tested through one
   CTest target per group with the real GPU as golden reference, including

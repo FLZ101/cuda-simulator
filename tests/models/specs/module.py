@@ -26,6 +26,16 @@ def linear_kernel(x_ptr, w_ptr, b_ptr, out_ptr, m, n, k: tl.constexpr):
 
 
 @triton.jit
+def embedding_kernel(idx_ptr, weight_ptr, out_ptr, D: tl.constexpr):
+    pid = tl.program_id(0)
+    pos = pid // D
+    dim = pid % D
+    index = tl.load(idx_ptr + pos).to(tl.int32)
+    value = tl.load(weight_ptr + index * D + dim)
+    tl.store(out_ptr + pid, value)
+
+
+@triton.jit
 def relu_kernel(in_ptr, out_ptr, n, BLOCK: tl.constexpr):
     pid = tl.program_id(0)
     offsets = pid * BLOCK + tl.arange(0, BLOCK)
@@ -378,6 +388,9 @@ def softmax_kernel(x_ptr, out_ptr, N: tl.constexpr, log: tl.constexpr):
 
 def add_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--module-file", required=True)
+    parser.add_argument("--seq-len", type=int, default=8)
+    parser.add_argument("--vocab-size", type=int, default=32)
+    parser.add_argument("--embedding-dim", type=int, default=16)
     parser.add_argument("--batch", type=int, default=4)
     parser.add_argument("--in-features", type=int, default=16)
     parser.add_argument("--hidden", type=int, default=32)
@@ -436,6 +449,15 @@ def _weighted_nodes(traced):
             continue
         module = traced.get_submodule(node.target)
         if isinstance(module, (torch.nn.Linear, torch.nn.Conv2d)):
+            yield node, module
+
+
+def _embedding_nodes(traced):
+    for node in traced.graph.nodes:
+        if node.op != "call_module":
+            continue
+        module = traced.get_submodule(node.target)
+        if isinstance(module, torch.nn.Embedding):
             yield node, module
 
 
@@ -676,6 +698,10 @@ def _shape_map(traced, example_input):
                 if len(input_shape) != 2:
                     raise RuntimeError(f"unsupported Linear input shape: {input_shape}")
                 shapes[node.name] = [input_shape[0], module.out_features]
+            elif isinstance(module, torch.nn.Embedding):
+                if not input_shape:
+                    raise RuntimeError("Embedding requires a non-empty input shape")
+                shapes[node.name] = list(input_shape) + [module.embedding_dim]
             elif isinstance(module, torch.nn.Conv2d):
                 if len(input_shape) != 4:
                     raise RuntimeError(f"unsupported Conv2d input shape: {input_shape}")
@@ -932,6 +958,19 @@ def _graph_program(traced, shapes):
                     "shape": shapes[node.name],
                 }
             )
+        elif isinstance(module, torch.nn.Embedding):
+            input_shape = shapes[_predecessor_name(node)]
+            program.append(
+                {
+                    "kind": "embedding",
+                    "name": node.name,
+                    "input": input_name,
+                    "num_embeddings": module.num_embeddings,
+                    "embedding_dim": module.embedding_dim,
+                    "num_tokens": _numel(input_shape),
+                    "shape": shapes[node.name],
+                }
+            )
         elif isinstance(module, torch.nn.Conv2d):
             kernel_h = _square_pair(module, "kernel_size")
             kernel_w = kernel_h
@@ -1134,6 +1173,8 @@ def run_cpu(args: argparse.Namespace, output_dir: pathlib.Path) -> None:
     for index, (_, module) in enumerate(_weighted_nodes(traced)):
         write_floats(output_dir / f"weight{index}.bin", module.weight)
         write_floats(output_dir / f"bias{index}.bin", _module_bias(module))
+    for index, (_, module) in enumerate(_embedding_nodes(traced)):
+        write_floats(output_dir / f"embedding{index}.bin", module.weight)
     for index, (_, module) in enumerate(_batch_norm_nodes(traced)):
         weight = module.weight if module.weight is not None else torch.ones(module.num_features)
         bias = module.bias if module.bias is not None else torch.zeros(module.num_features)
@@ -1163,6 +1204,7 @@ def native_arguments(args: argparse.Namespace, output_dir: pathlib.Path) -> list
     model, _ = _build_model(args)
     traced = _trace(model)
     weighted = list(_weighted_nodes(traced))
+    embeddings = list(_embedding_nodes(traced))
     batch_norms = list(_batch_norm_nodes(traced))
     layer_norms = list(_layer_norm_nodes(traced))
     arguments = [
@@ -1178,6 +1220,13 @@ def native_arguments(args: argparse.Namespace, output_dir: pathlib.Path) -> list
                 str(output_dir / f"weight{index}.bin"),
                 f"--bias{index}",
                 str(output_dir / f"bias{index}.bin"),
+            ]
+        )
+    for index, _ in enumerate(embeddings):
+        arguments.extend(
+            [
+                f"--embedding{index}",
+                str(output_dir / f"embedding{index}.bin"),
             ]
         )
     for index, _ in enumerate(batch_norms):
@@ -1284,6 +1333,10 @@ def _weighted_index(weighted_ops, op):
     return next(index for index, candidate in enumerate(weighted_ops) if candidate is op)
 
 
+def _embedding_index(embeddings, op):
+    return next(index for index, candidate in enumerate(embeddings) if candidate is op)
+
+
 def generate_native_runner(args: argparse.Namespace, output_path: pathlib.Path) -> None:
     if not torch.cuda.is_available():
         raise RuntimeError("CUDA-capable PyTorch is required to generate Triton PTX")
@@ -1293,6 +1346,7 @@ def generate_native_runner(args: argparse.Namespace, output_path: pathlib.Path) 
     shapes = _shape_map(traced, example_input)
     program = _graph_program(traced, shapes)
     linears = [op for op in program if op["kind"] == "linear"]
+    embeddings = [op for op in program if op["kind"] == "embedding"]
     convs = [op for op in program if op["kind"] == "conv2d"]
     relus = [op for op in program if op["kind"] == "relu"]
     activations = [op for op in program if op["kind"] == "activation"]
@@ -1326,6 +1380,25 @@ def generate_native_runner(args: argparse.Namespace, output_path: pathlib.Path) 
             {"k": k, "num_warps": 1},
         ).replace("linear_kernel", f"linear_{index}_kernel")
         ptx_by_key[f"linear_{index}"] = ptx
+
+    for index, op in enumerate(embeddings):
+        token_count = op["num_tokens"]
+        embedding_dim = op["embedding_dim"]
+        count = token_count * embedding_dim
+        idx = torch.arange(token_count, device="cuda", dtype=torch.float32)
+        weight = torch.randn(
+            op["num_embeddings"] * embedding_dim,
+            device="cuda",
+            dtype=torch.float32,
+        )
+        out = torch.empty(count, device="cuda", dtype=torch.float32)
+        ptx = compile_kernel(
+            embedding_kernel,
+            (count,),
+            (idx, weight, out),
+            {"D": embedding_dim, "num_warps": 1},
+        ).replace("embedding_kernel", f"embedding_{index}_kernel")
+        ptx_by_key[f"embedding_{index}"] = ptx
 
     for index, op in enumerate(convs):
         n, c, h, w = op["input_shape"]
@@ -1601,6 +1674,7 @@ def generate_native_runner(args: argparse.Namespace, output_path: pathlib.Path) 
             traced,
             program,
             linears,
+            embeddings,
             convs,
             relus,
             activations,
@@ -1628,6 +1702,7 @@ def _generate_cpp(
     traced,
     program,
     linears,
+    embeddings,
     convs,
     relus,
     activations,
@@ -1657,6 +1732,9 @@ def _generate_cpp(
     for index, _ in enumerate(linears):
         function_loads.append(f"""  CUfunction linear{index}_fn = load_function(
       R"CUPTX({ptx_by_key[f"linear_{index}"]})CUPTX", "linear_{index}_kernel");""")
+    for index, _ in enumerate(embeddings):
+        function_loads.append(f"""  CUfunction embedding{index}_fn = load_function(
+      R"CUPTX({ptx_by_key[f"embedding_{index}"]})CUPTX", "embedding_{index}_kernel");""")
     for index, _ in enumerate(convs):
         function_loads.append(f"""  CUfunction conv{index}_fn = load_function(
       R"CUPTX({ptx_by_key[f"conv2d_{index}"]})CUPTX", "conv2d_{index}_kernel");""")
@@ -1710,6 +1788,7 @@ def _generate_cpp(
     check_functions = (
         " || ".join(
             [f"!linear{index}_fn" for index in range(len(linears))]
+            + [f"!embedding{index}_fn" for index in range(len(embeddings))]
             + [f"!conv{index}_fn" for index in range(len(convs))]
             + [f"!relu{index}_fn" for index in range(len(relus))]
             + [f"!activation{index}_fn" for index in range(len(activations))]
@@ -1735,6 +1814,8 @@ def _generate_cpp(
             for index in range(len(weighted))
         )
         + "\n"
+        + "\n".join(f"  std::string embedding{index}_path;" for index in range(len(embeddings)))
+        + "\n"
         + "\n".join(f"""  std::string bn_weight{index}_path;
   std::string bn_bias{index}_path;
   std::string bn_mean{index}_path;
@@ -1750,6 +1831,12 @@ def _generate_cpp(
       weight{index}_path = argv[++i];
     }} else if (arg == "--bias{index}" && i + 1 < argc) {{
       bias{index}_path = argv[++i];""")
+    embedding_arg_branches = []
+    for index, _ in enumerate(embeddings):
+        embedding_arg_branches.append(
+            f"""    }} else if (arg == "--embedding{index}" && i + 1 < argc) {{
+      embedding{index}_path = argv[++i];"""
+        )
     bn_arg_branches = []
     for index, _ in enumerate(batch_norms):
         bn_arg_branches.append(f"""    }} else if (arg == "--bn-weight{index}" && i + 1 < argc) {{
@@ -1766,7 +1853,9 @@ def _generate_cpp(
       ln_weight{index}_path = argv[++i];
     }} else if (arg == "--ln-bias{index}" && i + 1 < argc) {{
       ln_bias{index}_path = argv[++i];""")
-    arg_parser = "\n".join(weight_arg_branches + bn_arg_branches + ln_arg_branches)
+    arg_parser = "\n".join(
+        weight_arg_branches + embedding_arg_branches + bn_arg_branches + ln_arg_branches
+    )
 
     weight_reads = []
     for index, op in enumerate(weighted):
@@ -1782,6 +1871,16 @@ def _generate_cpp(
       static_cast<int>(bias{index}.size()) != {bias_count}) {{
     return 3;
   }}""")
+
+    embedding_reads = []
+    for index, op in enumerate(embeddings):
+        count = op["num_embeddings"] * op["embedding_dim"]
+        embedding_reads.append(
+            f"""  const auto embedding{index} = read_floats(embedding{index}_path);
+  if (static_cast<int>(embedding{index}.size()) != {count}) {{
+    return 3;
+  }}"""
+        )
 
     bn_reads = []
     for index, op in enumerate(batch_norms):
@@ -1815,6 +1914,12 @@ def _generate_cpp(
       allocate_and_copy(bias{index}.data(), bias{index}.size() * sizeof(float));"""
         for index in range(len(weighted))
     )
+    device_embedding_allocs = "\n".join(
+        f"""  CUdeviceptr d_embedding{index} =
+      allocate_and_copy(embedding{index}.data(),
+                        embedding{index}.size() * sizeof(float));"""
+        for index in range(len(embeddings))
+    )
     device_bn_allocs = "\n".join(
         f"""  CUdeviceptr d_bn_weight{index} =
       allocate_and_copy(bn_weight{index}.data(),
@@ -1842,6 +1947,7 @@ def _generate_cpp(
     alloc_guard_parts = ["!d_input"]
     alloc_guard_parts.extend(f"!d_weight{index}" for index in range(len(weighted)))
     alloc_guard_parts.extend(f"!d_bias{index}" for index in range(len(weighted)))
+    alloc_guard_parts.extend(f"!d_embedding{index}" for index in range(len(embeddings)))
     alloc_guard_parts.extend(f"!d_bn_weight{index}" for index in range(len(batch_norms)))
     alloc_guard_parts.extend(f"!d_bn_bias{index}" for index in range(len(batch_norms)))
     alloc_guard_parts.extend(f"!d_bn_mean{index}" for index in range(len(batch_norms)))
@@ -1902,6 +2008,13 @@ def _generate_cpp(
                      d_weight{weight_index}, d_bias{weight_index}, {output_var},
                      {op["shape"][0]}, {op["out_features"]})) {{
     return 6;
+  }}""")
+        elif op["kind"] == "embedding":
+            embedding_index = _embedding_index(embeddings, op)
+            count = op["num_tokens"] * op["embedding_dim"]
+            launches.append(f"""  if (!launch_embedding(embedding{embedding_index}_fn, {input_var},
+                         d_embedding{embedding_index}, {output_var}, {count})) {{
+    return 23;
   }}""")
         elif op["kind"] == "conv2d":
             conv_index = _conv_index(convs, op)
@@ -2027,6 +2140,15 @@ def _generate_cpp(
                               nullptr, params, nullptr));
 }"""
         )
+    if embeddings:
+        launch_helpers.append("""bool launch_embedding(CUfunction function, CUdeviceptr idx,
+                        CUdeviceptr weight, CUdeviceptr out, int count) {
+  CUdeviceptr scratch = 0;
+  CUdeviceptr profile_scratch = 0;
+  void *params[] = {&idx, &weight, &out, &scratch, &profile_scratch};
+  return check(cuLaunchKernel(function, static_cast<unsigned int>(count), 1, 1,
+                              32, 1, 1, 0, nullptr, params, nullptr));
+}""")
     if convs:
         launch_helpers.append("""bool launch_conv(CUfunction function, CUdeviceptr x, CUdeviceptr w,
                  CUdeviceptr b, CUdeviceptr out, int n, int k, int out_h,
@@ -2221,6 +2343,7 @@ int main(int argc, char **argv) {{
   }}
 
 {chr(10).join(weight_reads)}
+{chr(10).join(embedding_reads)}
 {chr(10).join(bn_reads)}
 {chr(10).join(ln_reads)}
 
@@ -2231,6 +2354,7 @@ int main(int argc, char **argv) {{
 
   CUdeviceptr d_input = allocate_and_copy(input.data(), input.size() * sizeof(float));
 {device_weight_allocs}
+{device_embedding_allocs}
 {device_bn_allocs}
 {device_ln_allocs}
   if ({alloc_guard}) {{

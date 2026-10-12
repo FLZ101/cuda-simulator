@@ -5,7 +5,7 @@
 ```bash
 make venv          # installs pinned PyTorch/Triton/NumPy + dev tooling
 make build         # configure (Ninja) + build
-make test          # full CTest suite (45 tests)
+make test          # full CTest suite (50 tests)
 make format-python
 make precommit
 ```
@@ -34,7 +34,10 @@ PTX only (never CUBIN/SASS). v1 correctness targets:
   (`tests/models/specs/_common.py`) generates the C++ from a `Runner`
   description. `vector_add`, `matmul`, and `mlp` are declarative `build_runner`
   specs; `module.py` is the generic FX-traced converter.
-- **All 45 CTest tests pass.**
+- **Step 10 embedding checkpoint**: `tests/models/specs/module.py` now lowers
+  traced `nn.Embedding` modules and emits SIMT PTX embedding kernels. The new
+  `models.gpt2_embedding.runner_cpu` and `models.gpt2_embedding.runner_sim`
+  tests pass.
 
 ## Where Things Live
 
@@ -79,6 +82,6 @@ PTX only (never CUBIN/SASS). v1 correctness targets:
 1. Replace the fixed 1024-per-bank register banks with a
    `.reg`-declaration-driven `RegisterLayout` once a generated kernel exceeds
    current capacity.
-2. Extend the model-runner converter to lower full traced PyTorch graphs
-   (ResNet- and GPT-2-style) to native runners with embedded SIMT PTX.
+2. Continue extending the model-runner converter for GPT-2 attention, residual
+   blocks, and the LM head. Token embedding lowering is complete.
 3. Add missing PTX semantics as newly generated kernels expose them.
