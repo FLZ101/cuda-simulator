@@ -6,6 +6,9 @@ include(GNUInstallDirs)
 include(cmake/CompilerWarnings.cmake)
 include(cmake/SimulatorOptions.cmake)
 
+find_package(Python3 3.10 REQUIRED COMPONENTS Development)
+message(STATUS "Found Python development headers ${Python3_VERSION}")
+
 find_package(CUDAToolkit REQUIRED)
 message(STATUS "Found CUDA toolkit ${CUDAToolkit_VERSION}")
 message(STATUS "nvcc: ${CUDAToolkit_NVCC_EXECUTABLE}")
