@@ -558,6 +558,7 @@ add_custom_command(
           --block 32
   DEPENDS
     ${CMAKE_CURRENT_SOURCE_DIR}/models/generate_model_runner.py
+    ${CMAKE_CURRENT_SOURCE_DIR}/models/specs/_common.py
     ${CMAKE_CURRENT_SOURCE_DIR}/models/specs/vector_add.py
   VERBATIM
 )
@@ -605,6 +606,7 @@ add_custom_command(
           --k 8
   DEPENDS
     ${CMAKE_CURRENT_SOURCE_DIR}/models/generate_model_runner.py
+    ${CMAKE_CURRENT_SOURCE_DIR}/models/specs/_common.py
     ${CMAKE_CURRENT_SOURCE_DIR}/models/specs/matmul.py
   VERBATIM
 )
@@ -656,6 +658,7 @@ add_custom_command(
           --block 32
   DEPENDS
     ${CMAKE_CURRENT_SOURCE_DIR}/models/generate_model_runner.py
+    ${CMAKE_CURRENT_SOURCE_DIR}/models/specs/_common.py
     ${CMAKE_CURRENT_SOURCE_DIR}/models/specs/mlp.py
   VERBATIM
 )
@@ -710,6 +713,7 @@ add_custom_command(
           --block 32
   DEPENDS
     ${CMAKE_CURRENT_SOURCE_DIR}/models/generate_model_runner.py
+    ${CMAKE_CURRENT_SOURCE_DIR}/models/specs/_common.py
     ${CMAKE_CURRENT_SOURCE_DIR}/models/specs/module.py
     ${MODULE_MODEL_FIXTURE}
   VERBATIM
@@ -768,6 +772,7 @@ add_custom_command(
           --block 32
   DEPENDS
     ${CMAKE_CURRENT_SOURCE_DIR}/models/generate_model_runner.py
+    ${CMAKE_CURRENT_SOURCE_DIR}/models/specs/_common.py
     ${CMAKE_CURRENT_SOURCE_DIR}/models/specs/module.py
     ${CONV_MODEL_FIXTURE}
   VERBATIM
@@ -836,6 +841,7 @@ add_custom_command(
           --block 32
   DEPENDS
     ${CMAKE_CURRENT_SOURCE_DIR}/models/generate_model_runner.py
+    ${CMAKE_CURRENT_SOURCE_DIR}/models/specs/_common.py
     ${CMAKE_CURRENT_SOURCE_DIR}/models/specs/module.py
     ${RESNET_STEM_MODEL_FIXTURE}
   VERBATIM
@@ -904,6 +910,7 @@ add_custom_command(
           --block 32
   DEPENDS
     ${CMAKE_CURRENT_SOURCE_DIR}/models/generate_model_runner.py
+    ${CMAKE_CURRENT_SOURCE_DIR}/models/specs/_common.py
     ${CMAKE_CURRENT_SOURCE_DIR}/models/specs/module.py
     ${CNN_OPS_MODEL_FIXTURE}
   VERBATIM
@@ -969,6 +976,7 @@ add_custom_command(
           --block 32
   DEPENDS
     ${CMAKE_CURRENT_SOURCE_DIR}/models/generate_model_runner.py
+    ${CMAKE_CURRENT_SOURCE_DIR}/models/specs/_common.py
     ${CMAKE_CURRENT_SOURCE_DIR}/models/specs/module.py
     ${LLM_OPS_MODEL_FIXTURE}
   VERBATIM

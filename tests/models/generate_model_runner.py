@@ -7,6 +7,8 @@ import sys
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
 
+from models.specs._common import generate_native_runner
+
 
 def main() -> int:
     parser = argparse.ArgumentParser()
@@ -22,7 +24,10 @@ def main() -> int:
     spec.add_arguments(parser)
     parsed = parser.parse_args()
     output_path = pathlib.Path(parsed.output_cpp)
-    spec.generate_native_runner(parsed, output_path)
+    if hasattr(spec, "build_runner"):
+        generate_native_runner(spec.build_runner(parsed), output_path)
+    else:
+        spec.generate_native_runner(parsed, output_path)
     print(f"generated native runner: {output_path}")
     return 0
 

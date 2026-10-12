@@ -4,15 +4,13 @@ import argparse
 import importlib.util
 import operator
 import pathlib
-import re
-import struct
 
 import torch
 import torch.fx
 import triton
 import triton.language as tl
 
-BANNED_PATTERN = re.compile(r"\b(mma|wmma|ldmatrix|stmatrix|wgmma|tcgen05)\b")
+from ._common import compile_kernel, runner_prelude, write_floats
 
 
 @triton.jit
@@ -412,27 +410,6 @@ def _trace(model: torch.nn.Module):
     traced = torch.fx.symbolic_trace(model)
     traced.recompile()
     return traced
-
-
-def _strip_debug_sections(ptx: str) -> str:
-    for marker in ("\n\t.file", "\n\t.section"):
-        if marker in ptx:
-            ptx = ptx.partition(marker)[0]
-    return ptx.rstrip() + "\n"
-
-
-def _compile_kernel(kernel, grid, args, kwargs):
-    compiled = kernel[grid](*args, **kwargs)
-    ptx = _strip_debug_sections(compiled.asm["ptx"])
-    matches = sorted(set(BANNED_PATTERN.findall(ptx)))
-    if matches:
-        raise RuntimeError(f"generated PTX contains tensor-core instructions: {matches}")
-    return ptx
-
-
-def _write_floats(path: pathlib.Path, values: torch.Tensor) -> None:
-    flat = values.reshape(-1).tolist()
-    path.write_bytes(b"".join(struct.pack("<f", value) for value in flat))
 
 
 def _linear_nodes(traced):
@@ -1129,13 +1106,13 @@ def run_cpu(args: argparse.Namespace, output_dir: pathlib.Path) -> None:
         },
         output_dir / "reference.pt",
     )
-    _write_floats(output_dir / "input.bin", example_input)
-    _write_floats(output_dir / "cpu_output.bin", output)
+    write_floats(output_dir / "input.bin", example_input)
+    write_floats(output_dir / "cpu_output.bin", output)
 
     traced = _trace(model)
     for index, (_, module) in enumerate(_weighted_nodes(traced)):
-        _write_floats(output_dir / f"weight{index}.bin", module.weight)
-        _write_floats(output_dir / f"bias{index}.bin", _module_bias(module))
+        write_floats(output_dir / f"weight{index}.bin", module.weight)
+        write_floats(output_dir / f"bias{index}.bin", _module_bias(module))
     for index, (_, module) in enumerate(_batch_norm_nodes(traced)):
         weight = module.weight if module.weight is not None else torch.ones(module.num_features)
         bias = module.bias if module.bias is not None else torch.zeros(module.num_features)
@@ -1149,16 +1126,16 @@ def run_cpu(args: argparse.Namespace, output_dir: pathlib.Path) -> None:
             if module.running_var is not None
             else torch.ones(module.num_features)
         )
-        _write_floats(output_dir / f"bn_weight{index}.bin", weight)
-        _write_floats(output_dir / f"bn_bias{index}.bin", bias)
-        _write_floats(output_dir / f"bn_mean{index}.bin", mean)
-        _write_floats(output_dir / f"bn_var{index}.bin", var)
+        write_floats(output_dir / f"bn_weight{index}.bin", weight)
+        write_floats(output_dir / f"bn_bias{index}.bin", bias)
+        write_floats(output_dir / f"bn_mean{index}.bin", mean)
+        write_floats(output_dir / f"bn_var{index}.bin", var)
     for index, (_, module) in enumerate(_layer_norm_nodes(traced)):
         normalized_size = module.normalized_shape[0]
         weight = module.weight if module.weight is not None else torch.ones(normalized_size)
         bias = module.bias if module.bias is not None else torch.zeros(normalized_size)
-        _write_floats(output_dir / f"ln_weight{index}.bin", weight)
-        _write_floats(output_dir / f"ln_bias{index}.bin", bias)
+        write_floats(output_dir / f"ln_weight{index}.bin", weight)
+        write_floats(output_dir / f"ln_bias{index}.bin", bias)
 
 
 def native_arguments(args: argparse.Namespace, output_dir: pathlib.Path) -> list[str]:
@@ -1321,7 +1298,7 @@ def generate_native_runner(args: argparse.Namespace, output_path: pathlib.Path) 
         w = torch.randn(n, k, device="cuda", dtype=torch.float32)
         b = torch.randn(n, device="cuda", dtype=torch.float32)
         out = torch.empty(m, n, device="cuda", dtype=torch.float32)
-        ptx = _compile_kernel(
+        ptx = compile_kernel(
             linear_kernel,
             (m, n),
             (x, w, b, out, m, n),
@@ -1342,7 +1319,7 @@ def generate_native_runner(args: argparse.Namespace, output_path: pathlib.Path) 
         weight = torch.randn(k, c, r, s, device="cuda", dtype=torch.float32)
         bias = torch.randn(k, device="cuda", dtype=torch.float32)
         out = torch.empty(n, k, out_h, out_w, device="cuda", dtype=torch.float32)
-        ptx = _compile_kernel(
+        ptx = compile_kernel(
             conv2d_kernel,
             (n * k, out_h, out_w),
             (x, weight, bias, out),
@@ -1364,7 +1341,7 @@ def generate_native_runner(args: argparse.Namespace, output_path: pathlib.Path) 
         count = _numel(op["shape"])
         input_tensor = torch.empty(count, device="cuda", dtype=torch.float32)
         output_tensor = torch.empty(count, device="cuda", dtype=torch.float32)
-        ptx = _compile_kernel(
+        ptx = compile_kernel(
             relu_kernel,
             (1,),
             (input_tensor, output_tensor, count),
@@ -1376,7 +1353,7 @@ def generate_native_runner(args: argparse.Namespace, output_path: pathlib.Path) 
         count = _numel(op["shape"])
         input_tensor = torch.empty(count, device="cuda", dtype=torch.float32)
         output_tensor = torch.empty(count, device="cuda", dtype=torch.float32)
-        ptx = _compile_kernel(
+        ptx = compile_kernel(
             activation_kernel,
             (1,),
             (input_tensor, output_tensor, count),
@@ -1393,7 +1370,7 @@ def generate_native_runner(args: argparse.Namespace, output_path: pathlib.Path) 
         count = _numel(op["shape"])
         input_tensor = torch.empty(count, device="cuda", dtype=torch.float32)
         output_tensor = torch.empty(count, device="cuda", dtype=torch.float32)
-        ptx = _compile_kernel(
+        ptx = compile_kernel(
             copy_kernel,
             (1,),
             (input_tensor, output_tensor, count),
@@ -1410,7 +1387,7 @@ def generate_native_runner(args: argparse.Namespace, output_path: pathlib.Path) 
         mean = torch.randn(c, device="cuda", dtype=torch.float32)
         var = torch.rand(c, device="cuda", dtype=torch.float32) + 1.0
         out = torch.empty(count, device="cuda", dtype=torch.float32)
-        ptx = _compile_kernel(
+        ptx = compile_kernel(
             batchnorm2d_kernel,
             (count,),
             (x, weight, bias, mean, var, out),
@@ -1429,7 +1406,7 @@ def generate_native_runner(args: argparse.Namespace, output_path: pathlib.Path) 
         out_h, out_w = op["shape"][2], op["shape"][3]
         x = torch.randn(n, c, h, w, device="cuda", dtype=torch.float32)
         out = torch.empty(n, c, out_h, out_w, device="cuda", dtype=torch.float32)
-        ptx = _compile_kernel(
+        ptx = compile_kernel(
             maxpool2d_kernel,
             (n * c, out_h, out_w),
             (x, out),
@@ -1451,7 +1428,7 @@ def generate_native_runner(args: argparse.Namespace, output_path: pathlib.Path) 
         out_h, out_w = op["shape"][2], op["shape"][3]
         x = torch.randn(n, c, h, w, device="cuda", dtype=torch.float32)
         out = torch.empty(n, c, out_h, out_w, device="cuda", dtype=torch.float32)
-        ptx = _compile_kernel(
+        ptx = compile_kernel(
             avgpool2d_kernel,
             (n * c, out_h, out_w),
             (x, out),
@@ -1472,7 +1449,7 @@ def generate_native_runner(args: argparse.Namespace, output_path: pathlib.Path) 
         n, c, h, w = op["input_shape"]
         x = torch.randn(n, c, h, w, device="cuda", dtype=torch.float32)
         out = torch.empty(n * c, device="cuda", dtype=torch.float32)
-        ptx = _compile_kernel(
+        ptx = compile_kernel(
             adaptive_avgpool2d_1x1_kernel,
             (n * c,),
             (x, out),
@@ -1487,7 +1464,7 @@ def generate_native_runner(args: argparse.Namespace, output_path: pathlib.Path) 
         n, c, h, w = op["input_shape"]
         x = torch.randn(n, c, h, w, device="cuda", dtype=torch.float32)
         out = torch.empty(n * c, device="cuda", dtype=torch.float32)
-        ptx = _compile_kernel(
+        ptx = compile_kernel(
             adaptive_maxpool2d_1x1_kernel,
             (n * c,),
             (x, out),
@@ -1503,7 +1480,7 @@ def generate_native_runner(args: argparse.Namespace, output_path: pathlib.Path) 
         a = torch.empty(count, device="cuda", dtype=torch.float32)
         b = torch.empty(count, device="cuda", dtype=torch.float32)
         out = torch.empty(count, device="cuda", dtype=torch.float32)
-        ptx = _compile_kernel(
+        ptx = compile_kernel(
             binary_kernel,
             (1,),
             (a, b, out, count),
@@ -1524,7 +1501,7 @@ def generate_native_runner(args: argparse.Namespace, output_path: pathlib.Path) 
         a = torch.empty(count, device="cuda", dtype=torch.float32)
         b = torch.empty(count, device="cuda", dtype=torch.float32)
         out = torch.empty(count, device="cuda", dtype=torch.float32)
-        ptx = _compile_kernel(
+        ptx = compile_kernel(
             concat_last_kernel,
             (1,),
             (a, b, out, count),
@@ -1543,7 +1520,7 @@ def generate_native_runner(args: argparse.Namespace, output_path: pathlib.Path) 
         count = m * n
         x = torch.empty(count, device="cuda", dtype=torch.float32)
         out = torch.empty(count, device="cuda", dtype=torch.float32)
-        ptx = _compile_kernel(
+        ptx = compile_kernel(
             transpose_kernel,
             (1,),
             (x, out),
@@ -1560,7 +1537,7 @@ def generate_native_runner(args: argparse.Namespace, output_path: pathlib.Path) 
         a = torch.randn(m, k, device="cuda", dtype=torch.float32)
         b = torch.randn(k, n, device="cuda", dtype=torch.float32)
         out = torch.empty(m, n, device="cuda", dtype=torch.float32)
-        ptx = _compile_kernel(
+        ptx = compile_kernel(
             matmul_kernel,
             (m, n),
             (a, b, out),
@@ -1575,7 +1552,7 @@ def generate_native_runner(args: argparse.Namespace, output_path: pathlib.Path) 
         weight = torch.randn(n, device="cuda", dtype=torch.float32)
         bias = torch.randn(n, device="cuda", dtype=torch.float32)
         out = torch.empty(count, device="cuda", dtype=torch.float32)
-        ptx = _compile_kernel(
+        ptx = compile_kernel(
             layernorm_kernel,
             (count,),
             (x, weight, bias, out),
@@ -1588,7 +1565,7 @@ def generate_native_runner(args: argparse.Namespace, output_path: pathlib.Path) 
         count = _numel(op["shape"])
         x = torch.randn(count, device="cuda", dtype=torch.float32)
         out = torch.empty(count, device="cuda", dtype=torch.float32)
-        ptx = _compile_kernel(
+        ptx = compile_kernel(
             softmax_kernel,
             (count,),
             (x, out),
@@ -2180,72 +2157,7 @@ def _generate_cpp(
 }""")
     launch_helpers_text = "\n".join(launch_helpers)
 
-    source = f"""#include <cuda.h>
-
-#include <fstream>
-#include <sstream>
-#include <string>
-#include <vector>
-
-namespace {{
-
-bool check(CUresult result) {{ return result == CUDA_SUCCESS; }}
-
-bool initialize_cuda() {{
-  if (!check(cuInit(0))) {{
-    return false;
-  }}
-  CUdevice device = 0;
-  if (!check(cuDeviceGet(&device, 0))) {{
-    return false;
-  }}
-  CUcontext context = nullptr;
-  if (!check(cuDevicePrimaryCtxRetain(&context, device))) {{
-    return false;
-  }}
-  return check(cuCtxSetCurrent(context));
-}}
-
-std::vector<float> read_floats(const std::string &path) {{
-  std::ifstream input(path, std::ios::binary);
-  std::vector<float> values;
-  float value = 0.0F;
-  while (input.read(reinterpret_cast<char *>(&value), sizeof(value))) {{
-    values.push_back(value);
-  }}
-  return values;
-}}
-
-void write_floats(const std::string &path, const std::vector<float> &values) {{
-  std::ofstream output(path, std::ios::binary);
-  output.write(reinterpret_cast<const char *>(values.data()),
-               static_cast<std::streamsize>(values.size() * sizeof(float)));
-}}
-
-CUfunction load_function(const char *ptx, const char *name) {{
-  CUmodule module = nullptr;
-  if (!check(cuModuleLoadData(&module, ptx))) {{
-    return nullptr;
-  }}
-  CUfunction function = nullptr;
-  if (!check(cuModuleGetFunction(&function, module, name))) {{
-    return nullptr;
-  }}
-  return function;
-}}
-
-CUdeviceptr allocate_and_copy(const void *data, std::size_t bytes) {{
-  CUdeviceptr ptr = 0;
-  if (!check(cuMemAlloc(&ptr, bytes))) {{
-    return 0;
-  }}
-  if (bytes != 0 && !check(cuMemcpyHtoD(ptr, data, bytes))) {{
-    cuMemFree(ptr);
-    return 0;
-  }}
-  return ptr;
-}}
-
+    source = runner_prelude() + f"""
 {launch_helpers_text}
 
 }} // namespace
