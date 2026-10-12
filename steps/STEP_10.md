@@ -130,13 +130,22 @@ Reference constraints:
 - files: generated CTest model runners for `module`, `conv_module`,
   `resnet_stem`, `cnn_ops`, and `llm_ops`
 - verification: all 10 CPU/sim model-runner tests pass.
+- Added causal scaled softmax lowering and a single GPT-2 attention head
+  fixture with bias-free Q/K/V/output projections. The attention graph uses
+  existing `Linear`, `matmul`, and `transpose` lowering plus a new
+  `causal_softmax` Triton kernel.
+- files: `tests/models/specs/module.py`, `tests/CMakeLists.txt`,
+  `tests/models/fixtures/gpt2_attention.py`
+- verification: `cmake --build build -j` and
+  `ctest --test-dir build -R 'models\.gpt2_attention\.runner_(cpu|sim)'
+  --output-on-failure` both pass; all 14 traced model-runner tests pass.
 
 ## Verification
 
-Checkpoint 1 passes:
+Checkpoints 1 and 2 pass:
 
 ```bash
-ctest --test-dir build -R 'models\.gpt2_embedding\.runner_(cpu|sim)' --output-on-failure
+ctest --test-dir build -R 'models\.gpt2_(embedding|attention)\.runner_(cpu|sim)' --output-on-failure
 ```
 
 ## Status

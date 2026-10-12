@@ -2,6 +2,7 @@
 
 import argparse
 import importlib.util
+import math
 import operator
 import pathlib
 
@@ -386,8 +387,32 @@ def softmax_kernel(x_ptr, out_ptr, N: tl.constexpr, log: tl.constexpr):
     tl.store(out_ptr + pid, result)
 
 
+@triton.jit
+def causal_softmax_kernel(
+    x_ptr,
+    out_ptr,
+    N: tl.constexpr,
+    scale: tl.constexpr,
+):
+    pid = tl.program_id(0)
+    row = pid // N
+    col = pid % N
+    max_value = float("-inf")
+    for j in tl.range(0, N):
+        value = tl.load(x_ptr + row * N + j) * scale
+        max_value = tl.maximum(max_value, tl.where(j <= row, value, float("-inf")))
+    denominator = 0.0
+    for j in tl.range(0, N):
+        value = tl.load(x_ptr + row * N + j) * scale
+        denominator += tl.where(j <= row, tl.exp(value - max_value), 0.0)
+    value = tl.load(x_ptr + pid) * scale
+    result = tl.where(col <= row, tl.exp(value - max_value) / denominator, 0.0)
+    tl.store(out_ptr + pid, result)
+
+
 def add_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--module-file", required=True)
+    parser.add_argument("--head-dim", type=int, default=16)
     parser.add_argument("--seq-len", type=int, default=8)
     parser.add_argument("--vocab-size", type=int, default=32)
     parser.add_argument("--embedding-dim", type=int, default=16)
@@ -559,6 +584,10 @@ def _softmax_nodes(traced):
         module = traced.get_submodule(node.target)
         if isinstance(module, (torch.nn.Softmax, torch.nn.LogSoftmax)):
             yield node, module
+
+
+def _causal_softmax_target(node):
+    return node.op == "call_function" and getattr(node.target, "__name__", "") == "causal_softmax"
 
 
 def _activation_mode(module):
@@ -832,6 +861,13 @@ def _shape_map(traced, example_input):
                 shapes[node.name] = input_shape
             else:
                 raise RuntimeError(f"unsupported module in traced graph: {type(module).__name__}")
+        elif _causal_softmax_target(node):
+            input_name = _predecessor_name(node)
+            if len(shapes[input_name]) != 2:
+                raise RuntimeError("causal_softmax requires a 2D scores tensor")
+            if shapes[input_name][0] != shapes[input_name][1]:
+                raise RuntimeError("causal_softmax requires square scores")
+            shapes[node.name] = shapes[input_name]
         elif node.op == "call_function" and node.target in (operator.add, operator.mul):
             left_name, right_name = _binary_input_names(node)
             if shapes[left_name] != shapes[right_name]:
@@ -879,6 +915,17 @@ def _shape_map(traced, example_input):
             if (dim0, dim1) not in ((0, 1), (1, 0)):
                 raise RuntimeError("only 2D row/column transpose is supported")
             shapes[node.name] = [input_shape[1], input_shape[0]]
+        elif node.op == "call_method" and node.target == "size":
+            input_name = _predecessor_name(node)
+            input_shape = shapes[input_name]
+            if len(node.args) < 2 or not isinstance(node.args[1], int):
+                raise RuntimeError("only tensor.size(int) metadata is supported")
+            dim = node.args[1]
+            if dim < 0:
+                dim += len(input_shape)
+            if not 0 <= dim < len(input_shape):
+                raise RuntimeError(f"invalid size dimension {dim} for {node.name}")
+            shapes[node.name] = [input_shape[dim]]
         else:
             raise RuntimeError(f"unsupported traced node: {node.op} {node.name}")
     return shapes
@@ -923,6 +970,28 @@ def _graph_program(traced, shapes):
                 }
             )
             continue
+        if _causal_softmax_target(node):
+            input_name = _predecessor_name(node)
+            if len(node.args) < 2:
+                raise RuntimeError("causal_softmax requires a head dimension argument")
+            head_dim_arg = node.args[1]
+            if isinstance(head_dim_arg, int):
+                head_dim = head_dim_arg
+            elif isinstance(head_dim_arg, torch.fx.Node):
+                head_dim = shapes[head_dim_arg.name][0]
+            else:
+                raise RuntimeError("causal_softmax head dimension must be static")
+            program.append(
+                {
+                    "kind": "causal_softmax",
+                    "name": node.name,
+                    "input": input_name,
+                    "normalized_size": shapes[input_name][-1],
+                    "scale": 1.0 / math.sqrt(head_dim),
+                    "shape": shapes[node.name],
+                }
+            )
+            continue
         if node.op == "call_function" and node.target is torch.flatten:
             input_name = _predecessor_name(node)
             program.append(
@@ -944,6 +1013,8 @@ def _graph_program(traced, shapes):
                     "shape": shapes[node.name],
                 }
             )
+            continue
+        if node.op == "call_method" and node.target == "size":
             continue
         module = traced.get_submodule(node.target)
         input_name = _predecessor_name(node)
@@ -1329,6 +1400,10 @@ def _softmax_index(softmaxes, op):
     return next(index for index, candidate in enumerate(softmaxes) if candidate is op)
 
 
+def _causal_softmax_index(causal_softmaxes, op):
+    return next(index for index, candidate in enumerate(causal_softmaxes) if candidate is op)
+
+
 def _weighted_index(weighted_ops, op):
     return next(index for index, candidate in enumerate(weighted_ops) if candidate is op)
 
@@ -1362,6 +1437,7 @@ def generate_native_runner(args: argparse.Namespace, output_path: pathlib.Path) 
     matmuls = [op for op in program if op["kind"] == "matmul"]
     layer_norms = [op for op in program if op["kind"] == "layernorm"]
     softmaxes = [op for op in program if op["kind"] == "softmax"]
+    causal_softmaxes = [op for op in program if op["kind"] == "causal_softmax"]
     weighted = [op for op in program if op["kind"] in ("linear", "conv2d")]
 
     ptx_by_key = {}
@@ -1667,6 +1743,19 @@ def generate_native_runner(args: argparse.Namespace, output_path: pathlib.Path) 
         ).replace("softmax_kernel", f"softmax_{index}_kernel")
         ptx_by_key[f"softmax_{index}"] = ptx
 
+    for index, op in enumerate(causal_softmaxes):
+        n = op["normalized_size"]
+        count = _numel(op["shape"])
+        x = torch.randn(count, device="cuda", dtype=torch.float32)
+        out = torch.empty(count, device="cuda", dtype=torch.float32)
+        ptx = compile_kernel(
+            causal_softmax_kernel,
+            (count,),
+            (x, out),
+            {"N": n, "scale": op["scale"], "num_warps": 1},
+        ).replace("causal_softmax_kernel", f"causal_softmax_{index}_kernel")
+        ptx_by_key[f"causal_softmax_{index}"] = ptx
+
     output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_text(
         _generate_cpp(
@@ -1690,6 +1779,7 @@ def generate_native_runner(args: argparse.Namespace, output_path: pathlib.Path) 
             matmuls,
             layer_norms,
             softmaxes,
+            causal_softmaxes,
             weighted,
             shapes,
             ptx_by_key,
@@ -1718,6 +1808,7 @@ def _generate_cpp(
     matmuls,
     layer_norms,
     softmaxes,
+    causal_softmaxes,
     weighted,
     shapes,
     ptx_by_key,
@@ -1784,6 +1875,9 @@ def _generate_cpp(
     for index, _ in enumerate(softmaxes):
         function_loads.append(f"""  CUfunction softmax{index}_fn = load_function(
       R"CUPTX({ptx_by_key[f"softmax_{index}"]})CUPTX", "softmax_{index}_kernel");""")
+    for index, _ in enumerate(causal_softmaxes):
+        function_loads.append(f"""  CUfunction causal_softmax{index}_fn = load_function(
+      R"CUPTX({ptx_by_key[f"causal_softmax_{index}"]})CUPTX", "causal_softmax_{index}_kernel");""")
     declarations = "\n".join(function_loads)
     check_functions = (
         " || ".join(
@@ -1804,6 +1898,7 @@ def _generate_cpp(
             + [f"!matmul{index}_fn" for index in range(len(matmuls))]
             + [f"!layernorm{index}_fn" for index in range(len(layer_norms))]
             + [f"!softmax{index}_fn" for index in range(len(softmaxes))]
+            + [f"!causal_softmax{index}_fn" for index in range(len(causal_softmaxes))]
         )
         or "false"
     )
@@ -2120,6 +2215,13 @@ def _generate_cpp(
                        {output_var}, {count})) {{
     return 18;
   }}""")
+        elif op["kind"] == "causal_softmax":
+            causal_softmax_index = _causal_softmax_index(causal_softmaxes, op)
+            count = _numel(op["shape"])
+            launches.append(f"""  if (!launch_softmax(causal_softmax{causal_softmax_index}_fn,
+                        {input_var}, {output_var}, {count})) {{
+    return 24;
+  }}""")
         else:
             raise RuntimeError(f"unsupported program operation: {op['kind']}")
 
@@ -2289,7 +2391,7 @@ def _generate_cpp(
   return check(cuLaunchKernel(function, static_cast<unsigned int>(count), 1, 1,
                               32, 1, 1, 0, nullptr, params, nullptr));
 }""")
-    if softmaxes:
+    if softmaxes or causal_softmaxes:
         launch_helpers.append("""bool launch_softmax(CUfunction function, CUdeviceptr x,
                     CUdeviceptr out, int count) {
   CUdeviceptr scratch = 0;
