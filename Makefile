@@ -31,6 +31,20 @@ RESNET_HEIGHT ?= 4 # 224
 RESNET_WIDTH ?= 4 # 224
 RESNET_BLOCK ?= 1 # 32
 RESNET_ARCH ?= 86
+
+GPT2_DIR ?= $(BUILD_DIR)/models/gpt2
+GPT2_RUNNER_SRC ?= $(GPT2_DIR)/gpt2_runner.cu
+GPT2_RUNNER ?= $(GPT2_DIR)/gpt2_runner
+GPT2_MODEL_FILE ?= tests/models/fixtures/gpt2.py
+GPT2_SEQ_LEN ?= 1
+GPT2_VOCAB_SIZE ?= 50257
+GPT2_EMBEDDING_DIM ?= 768
+GPT2_HEAD_DIM ?= 64
+GPT2_NUM_HEADS ?= 12
+GPT2_N_LAYER ?= 12
+GPT2_BLOCK ?= 32
+GPT2_ARCH ?= 86
+GPT2_ATOL ?= 1e-4
 CUDA_SIM_EXEC_THREADS ?= auto
 
 CMAKE_FLAGS := \
@@ -92,6 +106,23 @@ $(RESNET_RUNNER_SRC): venv
 $(RESNET_RUNNER): $(RESNET_RUNNER_SRC)
 	$(NVCC) -arch=sm_$(RESNET_ARCH) -o $(RESNET_RUNNER) $(RESNET_RUNNER_SRC) -lcuda
 
+$(GPT2_RUNNER_SRC): venv
+	mkdir -p $(GPT2_DIR)
+	$(VENV_PYTHON) tests/models/generate_model_runner.py \
+		--spec module \
+		--module-file $(GPT2_MODEL_FILE) \
+		--seq-len $(GPT2_SEQ_LEN) \
+		--vocab-size $(GPT2_VOCAB_SIZE) \
+		--embedding-dim $(GPT2_EMBEDDING_DIM) \
+		--head-dim $(GPT2_HEAD_DIM) \
+		--num-heads $(GPT2_NUM_HEADS) \
+		--n-layer $(GPT2_N_LAYER) \
+		--block $(GPT2_BLOCK) \
+		--output-cpp $(GPT2_RUNNER_SRC)
+
+$(GPT2_RUNNER): $(GPT2_RUNNER_SRC)
+	$(NVCC) -arch=sm_$(GPT2_ARCH) -o $(GPT2_RUNNER) $(GPT2_RUNNER_SRC) -lcuda
+
 resnet-cpu: build $(RESNET_RUNNER)
 	$(VENV_PYTHON) tests/models/model_runner.py \
 		--spec module \
@@ -140,14 +171,65 @@ resnet-gpu-cudasim: resnet-cpu
 		--core-dir $(BUILD_DIR)/src/core \
 		--output-dir $(RESNET_DIR)
 
-gpt2-cpu: build
-	$(CTEST) --test-dir $(BUILD_DIR) -R 'models\.gpt2\.runner_cpu' --output-on-failure
+gpt2-cpu: build $(GPT2_RUNNER)
+	$(VENV_PYTHON) tests/models/model_runner.py \
+		--spec module \
+		--mode cpu \
+		--pretrained \
+		--module-file $(GPT2_MODEL_FILE) \
+		--seq-len $(GPT2_SEQ_LEN) \
+		--vocab-size $(GPT2_VOCAB_SIZE) \
+		--embedding-dim $(GPT2_EMBEDDING_DIM) \
+		--head-dim $(GPT2_HEAD_DIM) \
+		--num-heads $(GPT2_NUM_HEADS) \
+		--n-layer $(GPT2_N_LAYER) \
+		--runner $(GPT2_RUNNER) \
+		--cudart $(BUILD_DIR)/src/compat/libcudart_shim.so \
+		--cuda $(BUILD_DIR)/src/compat/libcuda_shim.so \
+		--core-dir $(BUILD_DIR)/src/core \
+		--output-dir $(GPT2_DIR)
 
-gpt2-gpu: build
-	$(CTEST) --test-dir $(BUILD_DIR) -R 'models\.gpt2\.(runner_cpu|runner_gpu)' --output-on-failure
+gpt2-gpu: gpt2-cpu
+	$(VENV_PYTHON) tests/models/model_runner.py \
+		--spec module \
+		--mode gpu \
+		--compare \
+		--check-argmax \
+		--pretrained \
+		--module-file $(GPT2_MODEL_FILE) \
+		--seq-len $(GPT2_SEQ_LEN) \
+		--vocab-size $(GPT2_VOCAB_SIZE) \
+		--embedding-dim $(GPT2_EMBEDDING_DIM) \
+		--head-dim $(GPT2_HEAD_DIM) \
+		--num-heads $(GPT2_NUM_HEADS) \
+		--n-layer $(GPT2_N_LAYER) \
+		--runner $(GPT2_RUNNER) \
+		--cudart $(BUILD_DIR)/src/compat/libcudart_shim.so \
+		--cuda $(BUILD_DIR)/src/compat/libcuda_shim.so \
+		--core-dir $(BUILD_DIR)/src/core \
+		--output-dir $(GPT2_DIR)
 
-gpt2-gpu-cudasim: build
-	$(CTEST) --test-dir $(BUILD_DIR) -R 'models\.gpt2\.(runner_sim|zero_runner_cpu)' --output-on-failure
+gpt2-gpu-cudasim: gpt2-cpu
+	CUDA_SIM_EXEC_THREADS=$(CUDA_SIM_EXEC_THREADS) $(VENV_PYTHON) tests/models/model_runner.py \
+		--spec module \
+		--mode gpu \
+		--simulate \
+		--compare \
+		--check-argmax \
+		--atol $(GPT2_ATOL) \
+		--pretrained \
+		--module-file $(GPT2_MODEL_FILE) \
+		--seq-len $(GPT2_SEQ_LEN) \
+		--vocab-size $(GPT2_VOCAB_SIZE) \
+		--embedding-dim $(GPT2_EMBEDDING_DIM) \
+		--head-dim $(GPT2_HEAD_DIM) \
+		--num-heads $(GPT2_NUM_HEADS) \
+		--n-layer $(GPT2_N_LAYER) \
+		--runner $(GPT2_RUNNER) \
+		--cudart $(BUILD_DIR)/src/compat/libcudart_shim.so \
+		--cuda $(BUILD_DIR)/src/compat/libcuda_shim.so \
+		--core-dir $(BUILD_DIR)/src/core \
+		--output-dir $(GPT2_DIR)
 
 clean:
 	rm -rf $(BUILD_DIR)
@@ -162,7 +244,7 @@ help:
 	@echo "  make resnet-gpu-cudasim Run ResNet-50 through the CUDA simulator"
 	@echo "  make gpt2-cpu Run the pretrained GPT-2 PyTorch CPU reference"
 	@echo "  make gpt2-gpu Run GPT-2 on the real GPU and compare to CPU"
-	@echo "  make gpt2-gpu-cudasim Run the pretrained GPT-2 embedding/LM-head probe through the CUDA simulator"
+	@echo "  make gpt2-gpu-cudasim Run the pretrained GPT-2 model through the CUDA simulator"
 	@echo "  make compile_commands  Generate root compile_commands.json"
 	@echo "  make venv          Bootstrap .venv and install all dependencies"
 	@echo "  make precommit      Run pre-commit on all files"
