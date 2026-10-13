@@ -39,9 +39,8 @@ PTX only (never CUBIN/SASS). v1 correctness targets:
   `position_ids`/`arange` calls to SIMT PTX kernels. The full GPT-2 stack uses
   the cached Hugging Face `gpt2` pretrained weights mapped into the traced
   custom stack. The full 124M/12-block pretrained CPU reference and native-GPU
-  runner pass with argmax comparison; a pretrained zero-layer simulator probe
-  keeps the default CTest simulator gate bounded. The full interpreter run is
-  deferred to Step 11 throughput improvements.
+  runner pass with argmax comparison; the full 124M/12-block simulator gate is
+  also green after the Step 11 native backend landed.
 - **Step 11 complete**: `steps/STEP_11.md` records the native PTX-to-C++
   backend. `src/jit/ptx_to_cpp.*` lowers a `FunctionIR` to self-contained C++
   with per-function register/predicate array sizing; `src/jit/native_backend.*`
@@ -51,7 +50,9 @@ PTX only (never CUBIN/SASS). v1 correctness targets:
   this path first and falls back to the interpreter for shared memory,
   barriers, atomics, translation/compile failures, or execution failures. The
   full-size `1 x 3 x 224 x 224` ResNet-50 simulator run passes in 247.70s and
-  matches the PyTorch CPU reference.
+  matches the PyTorch CPU reference. The full pretrained GPT-2 simulator run
+  also passes: all 150 generated nodes complete and final logits/argmax match
+  the PyTorch CPU reference.
 
 ## Where Things Live
 
@@ -102,6 +103,5 @@ PTX only (never CUBIN/SASS). v1 correctness targets:
    `.reg`-declaration-driven layout once a generated kernel exceeds current
    capacity.
 3. Add missing PTX semantics as newly generated kernels expose them.
-4. Finish the full 124M/12-block simulator gate now that the ResNet-50
-   throughput gate is green; the pretrained CPU reference, real-GPU
-   comparison, argmax check, and zero-layer simulator probe are already green.
+4. ~~Finish the full 124M/12-block simulator gate~~ complete in
+   `steps/STEP_11.md`.

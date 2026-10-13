@@ -155,3 +155,11 @@ make precommit
 - verification:
   `make resnet-gpu-cudasim RESNET_BATCH=1 RESNET_HEIGHT=224 RESNET_WIDTH=224 RESNET_BLOCK=32`
   completes in 247.70s and matches the PyTorch CPU reference.
+
+- Completed the full 124M/12-block pretrained GPT-2 simulator gate with
+  Triton 3.8 codegen; all 150 generated nodes complete and the final logits
+  and argmax match the PyTorch CPU reference.
+- files: `steps/STEP_11.md`, `Makefile`, `SESSION_SUMMARY.md`, `DESIGN.md`
+- verification: `make gpt2-gpu-cudasim` passes with the default
+  `50257/768/12/12` configuration, reporting `PyTorch CPU reference matches
+  (50257 floats); argmax matches (198)`.

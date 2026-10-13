@@ -5,6 +5,7 @@ import importlib.util
 import math
 import operator
 import pathlib
+import re
 
 import torch
 import torch.fx
@@ -1972,6 +1973,13 @@ def generate_native_runner(args: argparse.Namespace, output_path: pathlib.Path) 
     )
 
 
+def _ptx_entry_name(ptx: str) -> str:
+    match = re.search(r"\.(?:visible\s+)?\.entry\s+([A-Za-z0-9_$]+)\s*\(", ptx)
+    if match is None:
+        raise RuntimeError("PTX entry name not found")
+    return match.group(1)
+
+
 def _generate_cpp(
     args,
     traced,
@@ -2008,71 +2016,105 @@ def _generate_cpp(
 
     function_loads = []
     for index, _ in enumerate(linears):
-        function_loads.append(f"""  CUfunction linear{index}_fn = load_function(
-      R"CUPTX({ptx_by_key[f"linear_{index}"]})CUPTX", "linear_{index}_kernel");""")
+        function_loads.append(
+            f"""  CUfunction linear{index}_fn = load_function(
+      R"CUPTX({ptx_by_key[f"linear_{index}"]})CUPTX", "{_ptx_entry_name(ptx_by_key[f"linear_{index}"])}");"""
+        )
     for index, _ in enumerate(embeddings):
-        function_loads.append(f"""  CUfunction embedding{index}_fn = load_function(
-      R"CUPTX({ptx_by_key[f"embedding_{index}"]})CUPTX", "embedding_{index}_kernel");""")
+        function_loads.append(
+            f"""  CUfunction embedding{index}_fn = load_function(
+      R"CUPTX({ptx_by_key[f"embedding_{index}"]})CUPTX", "{_ptx_entry_name(ptx_by_key[f"embedding_{index}"])}");"""
+        )
     for index, _ in enumerate(convs):
-        function_loads.append(f"""  CUfunction conv{index}_fn = load_function(
-      R"CUPTX({ptx_by_key[f"conv2d_{index}"]})CUPTX", "conv2d_{index}_kernel");""")
+        function_loads.append(
+            f"""  CUfunction conv{index}_fn = load_function(
+      R"CUPTX({ptx_by_key[f"conv2d_{index}"]})CUPTX", "{_ptx_entry_name(ptx_by_key[f"conv2d_{index}"])}");"""
+        )
     for index, _ in enumerate(relus):
-        function_loads.append(f"""  CUfunction relu{index}_fn = load_function(
-      R"CUPTX({ptx_by_key[f"relu_{index}"]})CUPTX", "relu_{index}_kernel");""")
+        function_loads.append(
+            f"""  CUfunction relu{index}_fn = load_function(
+      R"CUPTX({ptx_by_key[f"relu_{index}"]})CUPTX", "{_ptx_entry_name(ptx_by_key[f"relu_{index}"])}");"""
+        )
     for index, _ in enumerate(activations):
-        function_loads.append(f"""  CUfunction activation{index}_fn = load_function(
-      R"CUPTX({ptx_by_key[f"activation_{index}"]})CUPTX", "activation_{index}_kernel");""")
+        function_loads.append(
+            f"""  CUfunction activation{index}_fn = load_function(
+      R"CUPTX({ptx_by_key[f"activation_{index}"]})CUPTX", "{_ptx_entry_name(ptx_by_key[f"activation_{index}"])}");"""
+        )
     for index, _ in enumerate(copies):
-        function_loads.append(f"""  CUfunction copy{index}_fn = load_function(
-      R"CUPTX({ptx_by_key[f"copy_{index}"]})CUPTX", "copy_{index}_kernel");""")
+        function_loads.append(
+            f"""  CUfunction copy{index}_fn = load_function(
+      R"CUPTX({ptx_by_key[f"copy_{index}"]})CUPTX", "{_ptx_entry_name(ptx_by_key[f"copy_{index}"])}");"""
+        )
     for index, _ in enumerate(batch_norms):
-        function_loads.append(f"""  CUfunction batchnorm{index}_fn = load_function(
-      R"CUPTX({ptx_by_key[f"batchnorm2d_{index}"]})CUPTX", "batchnorm2d_{index}_kernel");""")
+        function_loads.append(
+            f"""  CUfunction batchnorm{index}_fn = load_function(
+      R"CUPTX({ptx_by_key[f"batchnorm2d_{index}"]})CUPTX", "{_ptx_entry_name(ptx_by_key[f"batchnorm2d_{index}"])}");"""
+        )
     for index, _ in enumerate(max_pools):
-        function_loads.append(f"""  CUfunction maxpool{index}_fn = load_function(
-      R"CUPTX({ptx_by_key[f"maxpool2d_{index}"]})CUPTX", "maxpool2d_{index}_kernel");""")
+        function_loads.append(
+            f"""  CUfunction maxpool{index}_fn = load_function(
+      R"CUPTX({ptx_by_key[f"maxpool2d_{index}"]})CUPTX", "{_ptx_entry_name(ptx_by_key[f"maxpool2d_{index}"])}");"""
+        )
     for index, _ in enumerate(avg_pools):
-        function_loads.append(f"""  CUfunction avgpool{index}_fn = load_function(
-      R"CUPTX({ptx_by_key[f"avgpool2d_{index}"]})CUPTX", "avgpool2d_{index}_kernel");""")
+        function_loads.append(
+            f"""  CUfunction avgpool{index}_fn = load_function(
+      R"CUPTX({ptx_by_key[f"avgpool2d_{index}"]})CUPTX", "{_ptx_entry_name(ptx_by_key[f"avgpool2d_{index}"])}");"""
+        )
     for index, _ in enumerate(adaptive_avg_pools):
         function_loads.append(
             f"""  CUfunction adaptive_avgpool{index}_fn = load_function(
-      R"CUPTX({ptx_by_key[f"adaptive_avgpool2d_{index}"]})CUPTX", "adaptive_avgpool2d_{index}_kernel");"""
+      R"CUPTX({ptx_by_key[f"adaptive_avgpool2d_{index}"]})CUPTX", "{_ptx_entry_name(ptx_by_key[f"adaptive_avgpool2d_{index}"])}");"""
         )
     for index, _ in enumerate(adaptive_max_pools):
         function_loads.append(
             f"""  CUfunction adaptive_maxpool{index}_fn = load_function(
-      R"CUPTX({ptx_by_key[f"adaptive_maxpool2d_{index}"]})CUPTX", "adaptive_maxpool2d_{index}_kernel");"""
+      R"CUPTX({ptx_by_key[f"adaptive_maxpool2d_{index}"]})CUPTX", "{_ptx_entry_name(ptx_by_key[f"adaptive_maxpool2d_{index}"])}");"""
         )
     for index, _ in enumerate(binaries):
-        function_loads.append(f"""  CUfunction binary{index}_fn = load_function(
-      R"CUPTX({ptx_by_key[f"binary_{index}"]})CUPTX", "binary_{index}_kernel");""")
+        function_loads.append(
+            f"""  CUfunction binary{index}_fn = load_function(
+      R"CUPTX({ptx_by_key[f"binary_{index}"]})CUPTX", "{_ptx_entry_name(ptx_by_key[f"binary_{index}"])}");"""
+        )
     for index, _ in enumerate(cats):
-        function_loads.append(f"""  CUfunction cat{index}_fn = load_function(
-      R"CUPTX({ptx_by_key[f"cat_{index}"]})CUPTX", "cat_{index}_kernel");""")
+        function_loads.append(
+            f"""  CUfunction cat{index}_fn = load_function(
+      R"CUPTX({ptx_by_key[f"cat_{index}"]})CUPTX", "{_ptx_entry_name(ptx_by_key[f"cat_{index}"])}");"""
+        )
     for index, _ in enumerate(transposes):
-        function_loads.append(f"""  CUfunction transpose{index}_fn = load_function(
-      R"CUPTX({ptx_by_key[f"transpose_{index}"]})CUPTX", "transpose_{index}_kernel");""")
+        function_loads.append(
+            f"""  CUfunction transpose{index}_fn = load_function(
+      R"CUPTX({ptx_by_key[f"transpose_{index}"]})CUPTX", "{_ptx_entry_name(ptx_by_key[f"transpose_{index}"])}");"""
+        )
     for index, _ in enumerate(matmuls):
-        function_loads.append(f"""  CUfunction matmul{index}_fn = load_function(
-      R"CUPTX({ptx_by_key[f"matmul_{index}"]})CUPTX", "matmul_{index}_kernel");""")
+        function_loads.append(
+            f"""  CUfunction matmul{index}_fn = load_function(
+      R"CUPTX({ptx_by_key[f"matmul_{index}"]})CUPTX", "{_ptx_entry_name(ptx_by_key[f"matmul_{index}"])}");"""
+        )
     for index, _ in enumerate(layer_norms):
-        function_loads.append(f"""  CUfunction layernorm{index}_fn = load_function(
-      R"CUPTX({ptx_by_key[f"layernorm_{index}"]})CUPTX", "layernorm_{index}_kernel");""")
+        function_loads.append(
+            f"""  CUfunction layernorm{index}_fn = load_function(
+      R"CUPTX({ptx_by_key[f"layernorm_{index}"]})CUPTX", "{_ptx_entry_name(ptx_by_key[f"layernorm_{index}"])}");"""
+        )
     for index, _ in enumerate(softmaxes):
-        function_loads.append(f"""  CUfunction softmax{index}_fn = load_function(
-      R"CUPTX({ptx_by_key[f"softmax_{index}"]})CUPTX", "softmax_{index}_kernel");""")
+        function_loads.append(
+            f"""  CUfunction softmax{index}_fn = load_function(
+      R"CUPTX({ptx_by_key[f"softmax_{index}"]})CUPTX", "{_ptx_entry_name(ptx_by_key[f"softmax_{index}"])}");"""
+        )
     for index, _ in enumerate(causal_softmaxes):
-        function_loads.append(f"""  CUfunction causal_softmax{index}_fn = load_function(
-      R"CUPTX({ptx_by_key[f"causal_softmax_{index}"]})CUPTX", "causal_softmax_{index}_kernel");""")
+        function_loads.append(
+            f"""  CUfunction causal_softmax{index}_fn = load_function(
+      R"CUPTX({ptx_by_key[f"causal_softmax_{index}"]})CUPTX", "{_ptx_entry_name(ptx_by_key[f"causal_softmax_{index}"])}");"""
+        )
     for index, _ in enumerate(multihead_attentions):
         function_loads.append(
             f"""  CUfunction multihead_attention{index}_fn = load_function(
-      R"CUPTX({ptx_by_key[f"multihead_attention_{index}"]})CUPTX", "multihead_attention_{index}_kernel");"""
+      R"CUPTX({ptx_by_key[f"multihead_attention_{index}"]})CUPTX", "{_ptx_entry_name(ptx_by_key[f"multihead_attention_{index}"])}");"""
         )
     for index, _ in enumerate(aranges):
-        function_loads.append(f"""  CUfunction arange{index}_fn = load_function(
-      R"CUPTX({ptx_by_key[f"arange_{index}"]})CUPTX", "arange_{index}_kernel");""")
+        function_loads.append(
+            f"""  CUfunction arange{index}_fn = load_function(
+      R"CUPTX({ptx_by_key[f"arange_{index}"]})CUPTX", "{_ptx_entry_name(ptx_by_key[f"arange_{index}"])}");"""
+        )
     declarations = "\n".join(function_loads)
     check_functions = (
         " || ".join(

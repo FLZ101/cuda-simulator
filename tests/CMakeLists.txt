@@ -537,6 +537,19 @@ cudasim_set_warnings(mov_pred_exec_smoke)
 cudasim_apply_sanitizers(mov_pred_exec_smoke)
 add_test(NAME ptx.mov_pred_exec_smoke COMMAND mov_pred_exec_smoke)
 
+add_executable(cvt_u16_u32_exec_smoke
+  ptx/cvt_u16_u32_exec_smoke.cpp
+)
+target_compile_features(cvt_u16_u32_exec_smoke PRIVATE cxx_std_20)
+target_include_directories(cvt_u16_u32_exec_smoke PRIVATE ${CMAKE_SOURCE_DIR}/src)
+target_link_libraries(cvt_u16_u32_exec_smoke PRIVATE cuda_shim)
+target_compile_definitions(cvt_u16_u32_exec_smoke PRIVATE
+  PTX_FIXTURE_PATH="${CMAKE_CURRENT_SOURCE_DIR}/ptx/cvt_u16_u32_kernel.ptx"
+)
+cudasim_set_warnings(cvt_u16_u32_exec_smoke)
+cudasim_apply_sanitizers(cvt_u16_u32_exec_smoke)
+add_test(NAME ptx.cvt_u16_u32_exec_smoke COMMAND cvt_u16_u32_exec_smoke)
+
 add_test(
   NAME ptx.simt_gate
   COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/generated/check_simt.py
@@ -601,6 +614,10 @@ endforeach()
 set(SIM_PYTHON ${CMAKE_SOURCE_DIR}/.venv/bin/python)
 
 set(GENERATED_MODEL_DIR ${CMAKE_CURRENT_BINARY_DIR}/models/generated)
+if(CUDA_SIM_MODEL_GEN_JOBS LESS 1)
+  message(FATAL_ERROR "CUDA_SIM_MODEL_GEN_JOBS must be at least 1")
+endif()
+set_property(GLOBAL PROPERTY JOB_POOLS model_gen=${CUDA_SIM_MODEL_GEN_JOBS})
 set(VECTOR_ADD_RUNNER_SRC ${GENERATED_MODEL_DIR}/vector_add_runner.cu)
 set(MATMUL_RUNNER_SRC ${GENERATED_MODEL_DIR}/matmul_runner.cu)
 
@@ -611,6 +628,7 @@ add_custom_command(
           --output-cpp ${VECTOR_ADD_RUNNER_SRC}
           --n 32
           --block 32
+  JOB_POOL model_gen
   DEPENDS
     ${CMAKE_CURRENT_SOURCE_DIR}/models/generate_model_runner.py
     ${CMAKE_CURRENT_SOURCE_DIR}/models/specs/_common.py
@@ -659,6 +677,7 @@ add_custom_command(
           --m 8
           --n 8
           --k 8
+  JOB_POOL model_gen
   DEPENDS
     ${CMAKE_CURRENT_SOURCE_DIR}/models/generate_model_runner.py
     ${CMAKE_CURRENT_SOURCE_DIR}/models/specs/_common.py
@@ -711,6 +730,7 @@ add_custom_command(
           --hidden 32
           --out-features 8
           --block 32
+  JOB_POOL model_gen
   DEPENDS
     ${CMAKE_CURRENT_SOURCE_DIR}/models/generate_model_runner.py
     ${CMAKE_CURRENT_SOURCE_DIR}/models/specs/_common.py
@@ -766,6 +786,7 @@ add_custom_command(
           --hidden 32
           --out-features 8
           --block 32
+  JOB_POOL model_gen
   DEPENDS
     ${CMAKE_CURRENT_SOURCE_DIR}/models/generate_model_runner.py
     ${CMAKE_CURRENT_SOURCE_DIR}/models/specs/_common.py
@@ -825,6 +846,7 @@ add_custom_command(
           --height 8
           --width 8
           --block 32
+  JOB_POOL model_gen
   DEPENDS
     ${CMAKE_CURRENT_SOURCE_DIR}/models/generate_model_runner.py
     ${CMAKE_CURRENT_SOURCE_DIR}/models/specs/_common.py
@@ -894,6 +916,7 @@ add_custom_command(
           --height 8
           --width 8
           --block 32
+  JOB_POOL model_gen
   DEPENDS
     ${CMAKE_CURRENT_SOURCE_DIR}/models/generate_model_runner.py
     ${CMAKE_CURRENT_SOURCE_DIR}/models/specs/_common.py
@@ -963,6 +986,7 @@ add_custom_command(
           --height 8
           --width 8
           --block 32
+  JOB_POOL model_gen
   DEPENDS
     ${CMAKE_CURRENT_SOURCE_DIR}/models/generate_model_runner.py
     ${CMAKE_CURRENT_SOURCE_DIR}/models/specs/_common.py
@@ -1029,6 +1053,7 @@ add_custom_command(
           --batch 4
           --in-features 8
           --block 32
+  JOB_POOL model_gen
   DEPENDS
     ${CMAKE_CURRENT_SOURCE_DIR}/models/generate_model_runner.py
     ${CMAKE_CURRENT_SOURCE_DIR}/models/specs/_common.py
@@ -1090,6 +1115,7 @@ add_custom_command(
           --vocab-size 32
           --embedding-dim 16
           --block 32
+  JOB_POOL model_gen
   DEPENDS
     ${CMAKE_CURRENT_SOURCE_DIR}/models/generate_model_runner.py
     ${CMAKE_CURRENT_SOURCE_DIR}/models/specs/_common.py
@@ -1153,6 +1179,7 @@ add_custom_command(
           --embedding-dim 16
           --head-dim 8
           --block 32
+  JOB_POOL model_gen
   DEPENDS
     ${CMAKE_CURRENT_SOURCE_DIR}/models/generate_model_runner.py
     ${CMAKE_CURRENT_SOURCE_DIR}/models/specs/_common.py
@@ -1217,6 +1244,7 @@ add_custom_command(
           --head-dim 8
           --num-heads 2
           --block 32
+  JOB_POOL model_gen
   DEPENDS
     ${CMAKE_CURRENT_SOURCE_DIR}/models/generate_model_runner.py
     ${CMAKE_CURRENT_SOURCE_DIR}/models/specs/_common.py
@@ -1283,6 +1311,7 @@ add_custom_command(
           --head-dim 8
           --num-heads 2
           --block 32
+  JOB_POOL model_gen
   DEPENDS
     ${CMAKE_CURRENT_SOURCE_DIR}/models/generate_model_runner.py
     ${CMAKE_CURRENT_SOURCE_DIR}/models/specs/_common.py

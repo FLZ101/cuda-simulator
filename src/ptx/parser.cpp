@@ -125,6 +125,11 @@ void Parser::parse_directive(Module &module) {
     return;
   }
 
+  if (name == "func") {
+    skip_function();
+    return;
+  }
+
   if (name == "visible" || name == "extern" || name == "weak") {
     // `.extern .shared` declares dynamic shared memory and is not a function.
     if (name == "extern" && current_.kind == TokenKind::Dot) {
@@ -137,7 +142,11 @@ void Parser::parse_directive(Module &module) {
         return;
       }
       if (qualifier == "entry" || qualifier == "func") {
-        module.functions.push_back(parse_function(module));
+        if (qualifier == "func") {
+          skip_function();
+        } else {
+          module.functions.push_back(parse_function(module));
+        }
         return;
       }
     }
@@ -147,7 +156,11 @@ void Parser::parse_directive(Module &module) {
         const std::string qualifier =
             expect(TokenKind::Identifier, "expected qualifier").text;
         if (qualifier == "entry" || qualifier == "func") {
-          module.functions.push_back(parse_function(module));
+          if (qualifier == "func") {
+            skip_function();
+          } else {
+            module.functions.push_back(parse_function(module));
+          }
           return;
         }
         continue;
@@ -172,6 +185,30 @@ void Parser::parse_directive(Module &module) {
   }
 
   throw std::runtime_error("unsupported PTX directive: ." + name);
+}
+
+void Parser::skip_function() {
+  while (current_.kind != TokenKind::LBrace &&
+         current_.kind != TokenKind::Semicolon &&
+         current_.kind != TokenKind::End) {
+    consume();
+  }
+
+  if (current_.kind == TokenKind::Semicolon) {
+    consume();
+    return;
+  }
+
+  expect(TokenKind::LBrace, "expected '{' before function body");
+  int depth = 1;
+  while (depth > 0 && current_.kind != TokenKind::End) {
+    const Token token = consume();
+    if (token.kind == TokenKind::LBrace) {
+      ++depth;
+    } else if (token.kind == TokenKind::RBrace) {
+      --depth;
+    }
+  }
 }
 
 Function Parser::parse_function(Module &module) {

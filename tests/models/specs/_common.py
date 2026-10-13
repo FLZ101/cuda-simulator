@@ -6,6 +6,22 @@ import re
 import struct
 
 import torch
+import triton.language as tl
+
+if not hasattr(tl, "range"):
+    import triton.runtime.jit as _triton_jit
+
+    _dependencies_visit_call = _triton_jit.DependenciesFinder.visit_Call
+
+    def _dependencies_visit_call_with_range(self, node):
+        if self.visit(node.func) is range:
+            return
+        return _dependencies_visit_call(self, node)
+
+    _triton_jit.DependenciesFinder.visit_Call = _dependencies_visit_call_with_range
+    tl.range = range
+if not hasattr(tl, "erf"):
+    tl.erf = tl.math.erf
 
 BANNED_PATTERN = re.compile(r"\b(mma|wmma|ldmatrix|stmatrix|wgmma|tcgen05)\b")
 

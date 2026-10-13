@@ -6,7 +6,10 @@ import torch
 from models.fixtures import gpt2_block
 
 _SEQ_LEN = 8
-_PRETRAINED_URL = "https://huggingface.co/gpt2/resolve/main/pytorch_model.bin"
+_PRETRAINED_URLS = (
+    "https://s3.amazonaws.com/models.huggingface.co/bert/gpt2-pytorch_model.bin",
+    "https://huggingface.co/gpt2/resolve/main/pytorch_model.bin",
+)
 _PRETRAINED_FILE = ".cache/gpt2/pytorch_model.bin"
 
 
@@ -23,7 +26,15 @@ def _pretrained_checkpoint() -> pathlib.Path:
     checkpoint = _repo_root() / _PRETRAINED_FILE
     if not checkpoint.exists():
         checkpoint.parent.mkdir(parents=True, exist_ok=True)
-        urllib.request.urlretrieve(_PRETRAINED_URL, checkpoint)
+        last_error = None
+        for url in _PRETRAINED_URLS:
+            try:
+                urllib.request.urlretrieve(url, checkpoint)
+                return checkpoint
+            except Exception as exc:
+                last_error = exc
+                checkpoint.unlink(missing_ok=True)
+        raise RuntimeError(f"failed to download GPT-2 weights: {last_error}") from last_error
     return checkpoint
 
 

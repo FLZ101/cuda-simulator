@@ -639,12 +639,13 @@ Current status:
 - Step 10 is complete in `steps/STEP_10.md`; embedding, causal attention,
   transformer-block, and a full pretrained GPT-2 stack with position embeddings
   and LM head are green. The 124M/12-block PyTorch CPU reference and native-GPU
-  runner match with argmax comparison; the full 12-block interpreter gate is
-  deferred to the Step 11 performance work.
+  runner match with argmax comparison; the full 124M/12-block simulator gate is
+  green after the Step 11 native backend landed.
 - Step 11 is complete in `steps/STEP_11.md`. A native PTX-to-C++ backend with
   a disk cache and interpreter fallback is integrated; the full-size
   `1 x 3 x 224 x 224` ResNet-50 simulator run passes in 247.70s and matches
-  the PyTorch CPU reference.
+  the PyTorch CPU reference. The full pretrained GPT-2 simulator run also
+  passes with final logits and argmax matching the PyTorch CPU reference.
 - Step 8's `nvcc` operator execution qualification is implemented and green:
   generated kernels are grouped into operator families and tested through one
   CTest target per group with the real GPU as golden reference, including
@@ -1314,7 +1315,9 @@ attempted first for kernels that can be lowered safely and falls back to the
 interpreter for shared memory, barriers, atomics, or unsupported
 instructions. The full-size FP32 `1 x 3 x 224 x 224` ResNet-50 run is the
 recorded wall-time gate: it completes in 247.70 seconds and matches the
-PyTorch CPU reference within existing FP32 tolerances and argmax.
+PyTorch CPU reference within existing FP32 tolerances and argmax. The full
+124M/12-block GPT-2 simulator gate is also green: all generated nodes complete
+and final logits/argmax match the PyTorch CPU reference.
 
 ### Step 12: Compatibility Hardening
 

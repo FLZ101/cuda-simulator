@@ -694,7 +694,16 @@ ExecStatus execute_instruction(
 
     bool value = false;
     if (instruction.operand_tokens[pos].kind ==
-        cudasim::ptx::TokenKind::Number) {
+        cudasim::ptx::TokenKind::Minus) {
+      ++pos;
+      if (pos >= instruction.operand_tokens.size() ||
+          instruction.operand_tokens[pos].kind !=
+              cudasim::ptx::TokenKind::Number) {
+        return ExecStatus::Error;
+      }
+      value = std::stoll(instruction.operand_tokens[pos].text, nullptr, 0) != 0;
+    } else if (instruction.operand_tokens[pos].kind ==
+               cudasim::ptx::TokenKind::Number) {
       value = std::stoul(instruction.operand_tokens[pos].text, nullptr, 0) != 0;
     } else if (instruction.operand_tokens[pos].kind ==
                cudasim::ptx::TokenKind::Percent) {
@@ -1029,6 +1038,24 @@ ExecStatus execute_instruction(
       }
     }
     registers.values[dst->index][lane] = av * bv;
+    next_pc = pc + 1;
+    return ExecStatus::Continue;
+  }
+
+  if (opcode == "mul.wide.s16") {
+    std::size_t pos = 0;
+    auto dst = parse_register(instruction.operand_tokens, pos);
+    auto a =
+        parse_u32_operand(instruction.operand_tokens, pos, registers, lane);
+    auto b =
+        parse_u32_operand(instruction.operand_tokens, pos, registers, lane);
+    if (!dst || !a || !b) {
+      return ExecStatus::Error;
+    }
+    const auto av = static_cast<std::int16_t>(*a & 0xFFFFU);
+    const auto bv = static_cast<std::int16_t>(*b & 0xFFFFU);
+    registers.values[dst->index][lane] = static_cast<std::uint32_t>(
+        static_cast<std::int32_t>(av) * static_cast<std::int32_t>(bv));
     next_pc = pc + 1;
     return ExecStatus::Continue;
   }
@@ -1480,6 +1507,45 @@ ExecStatus execute_instruction(
     return ExecStatus::Continue;
   }
 
+  if (opcode == "shr.s16" || opcode == "shr.u16") {
+    std::size_t pos = 0;
+    auto dst = parse_register(instruction.operand_tokens, pos);
+    auto src = parse_register(instruction.operand_tokens, pos);
+    while (pos < instruction.operand_tokens.size() &&
+           instruction.operand_tokens[pos].kind ==
+               cudasim::ptx::TokenKind::Comma) {
+      ++pos;
+    }
+    if (!dst || !src || pos >= instruction.operand_tokens.size()) {
+      return ExecStatus::Error;
+    }
+    std::uint32_t amount = 0;
+    if (instruction.operand_tokens[pos].kind ==
+        cudasim::ptx::TokenKind::Number) {
+      amount = static_cast<std::uint32_t>(
+          std::stoul(instruction.operand_tokens[pos].text));
+    } else {
+      auto amount_reg = parse_register(instruction.operand_tokens, pos);
+      if (!amount_reg) {
+        return ExecStatus::Error;
+      }
+      amount =
+          static_cast<std::uint32_t>(registers.values[amount_reg->index][lane]);
+    }
+    const std::uint16_t value = static_cast<std::uint16_t>(
+        registers.values[src->index][lane] & 0xFFFFU);
+    if (opcode == "shr.u16") {
+      registers.values[dst->index][lane] =
+          static_cast<std::uint16_t>(value >> amount);
+    } else {
+      registers.values[dst->index][lane] = static_cast<std::uint16_t>(
+          static_cast<std::int32_t>(static_cast<std::int16_t>(value)) >>
+          amount);
+    }
+    next_pc = pc + 1;
+    return ExecStatus::Continue;
+  }
+
   if (opcode == "bar.sync") {
     next_pc = pc + 1;
     return ExecStatus::Continue;
@@ -1788,6 +1854,21 @@ ExecStatus execute_instruction(
     return ExecStatus::Continue;
   }
 
+  if (opcode == "add.s16") {
+    std::size_t pos = 0;
+    auto dst = parse_register(instruction.operand_tokens, pos);
+    auto a =
+        parse_u32_operand(instruction.operand_tokens, pos, registers, lane);
+    auto b =
+        parse_u32_operand(instruction.operand_tokens, pos, registers, lane);
+    if (!dst || !a || !b) {
+      return ExecStatus::Error;
+    }
+    registers.values[dst->index][lane] = (*a + *b) & 0xFFFFU;
+    next_pc = pc + 1;
+    return ExecStatus::Continue;
+  }
+
   if (opcode == "setp.eq.s64" || opcode == "setp.ne.s64" ||
       opcode == "setp.lt.s64" || opcode == "setp.le.s64" ||
       opcode == "setp.gt.s64" || opcode == "setp.ge.s64" ||
@@ -1961,6 +2042,19 @@ ExecStatus execute_instruction(
     }
     registers.values[dst->index][lane] =
         static_cast<std::uint64_t>(static_cast<std::int32_t>(*src));
+    next_pc = pc + 1;
+    return ExecStatus::Continue;
+  }
+
+  if (opcode == "cvt.u16.u32") {
+    std::size_t pos = 0;
+    auto dst = parse_register(instruction.operand_tokens, pos);
+    auto src =
+        parse_u32_operand(instruction.operand_tokens, pos, registers, lane);
+    if (!dst || !src) {
+      return ExecStatus::Error;
+    }
+    registers.values[dst->index][lane] = *src & 0xFFFFU;
     next_pc = pc + 1;
     return ExecStatus::Continue;
   }

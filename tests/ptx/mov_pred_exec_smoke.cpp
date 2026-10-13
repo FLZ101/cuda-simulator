@@ -61,7 +61,7 @@ int main() {
     return 7;
   }
 
-  if (output != 3U) {
+  if (output != 5U) {
     return 8;
   }
 

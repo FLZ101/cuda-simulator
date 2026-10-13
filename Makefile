@@ -1,4 +1,6 @@
 BUILD_DIR ?= build
+BUILD_JOBS ?= $(shell nproc 2>/dev/null || echo 1)
+MODEL_GEN_JOBS ?= 4
 CMAKE_BUILD_TYPE ?= Debug
 CMAKE ?= cmake
 CTEST ?= ctest
@@ -15,11 +17,22 @@ VENV_MARKER ?= $(VENV)/.marker
 # minor/patch. Override PYTORCH_CUDA_TAG for a different CUDA line.
 NVCC ?= $(shell command -v nvcc 2>/dev/null || echo /usr/local/cuda/bin/nvcc)
 CUDA_MAJOR := $(shell $(NVCC) --version 2>/dev/null | sed -n 's/.*release \([0-9]*\)\.[0-9]*.*/\1/p')
-PYTORCH_CUDA_TAG ?= cu$(CUDA_MAJOR)0
+PYTORCH_CUDA_TAG ?= $(if $(filter 12,$(CUDA_MAJOR)),cu121,cu$(CUDA_MAJOR)0)
 PYTORCH_INDEX_URL ?= https://download.pytorch.org/whl/$(PYTORCH_CUDA_TAG)
+ifeq ($(PYTORCH_CUDA_TAG),cu121)
+TORCH_VERSION ?= 2.5.1+$(PYTORCH_CUDA_TAG)
+TORCHVISION_VERSION ?= 0.20.1+$(PYTORCH_CUDA_TAG)
+TRITON_VERSION ?= 3.1.0
+PTXAS ?= $(shell command -v ptxas 2>/dev/null || echo /usr/local/cuda/bin/ptxas)
+TRITON_ENV := TRITON_PTXAS_PATH=$(PTXAS)
+PIP_INDEX_ARGS := --index-url $(PYTORCH_INDEX_URL) --extra-index-url https://pypi.org/simple
+else
 TORCH_VERSION ?= 2.14.1+$(PYTORCH_CUDA_TAG)
 TORCHVISION_VERSION ?= 0.29.1+$(PYTORCH_CUDA_TAG)
 TRITON_VERSION ?= 3.8.0
+TRITON_ENV :=
+PIP_INDEX_ARGS := --index-url $(PYTORCH_INDEX_URL)
+endif
 
 RESNET_DIR ?= $(BUILD_DIR)/models/resnet50
 RESNET_RUNNER_SRC ?= $(RESNET_DIR)/resnet50_runner.cu
@@ -50,7 +63,8 @@ CUDA_SIM_EXEC_THREADS ?= auto
 CMAKE_FLAGS := \
 	-DCMAKE_BUILD_TYPE=$(CMAKE_BUILD_TYPE) \
 	-DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
-	-DCUDA_SIM_ENABLE_SANITIZERS=OFF
+	-DCUDA_SIM_ENABLE_SANITIZERS=OFF \
+	-DCUDA_SIM_MODEL_GEN_JOBS=$(MODEL_GEN_JOBS)
 
 .PHONY: all build configure test run clean help precommit format format-python venv compile_commands resnet-cpu resnet-gpu resnet-gpu-cudasim gpt2-cpu gpt2-gpu gpt2-gpu-cudasim
 
@@ -59,7 +73,7 @@ all: build
 $(VENV_MARKER):
 	$(PYTHON) -m venv $(VENV)
 	$(VENV_PIP) install --upgrade pip
-	$(VENV_PIP) install "torch==$(TORCH_VERSION)" "torchvision==$(TORCHVISION_VERSION)" "triton==$(TRITON_VERSION)" --index-url $(PYTORCH_INDEX_URL)
+	$(VENV_PIP) install "torch==$(TORCH_VERSION)" "torchvision==$(TORCHVISION_VERSION)" "triton==$(TRITON_VERSION)" $(PIP_INDEX_ARGS)
 	$(VENV_PIP) install -r requirements-dev.txt
 	$(VENV_PRE_COMMIT) install
 	touch "$(VENV_MARKER)"
@@ -82,7 +96,7 @@ compile_commands: configure
 	ln -sfn $(BUILD_DIR)/compile_commands.json compile_commands.json
 
 build: configure
-	$(CMAKE) --build $(BUILD_DIR)
+	$(CMAKE) --build $(BUILD_DIR) --parallel $(BUILD_JOBS)
 
 test: build
 	$(CTEST) --test-dir $(BUILD_DIR) --output-on-failure
@@ -92,7 +106,7 @@ run: build
 
 $(RESNET_RUNNER_SRC): venv
 	mkdir -p $(RESNET_DIR)
-	$(VENV_PYTHON) tests/models/generate_model_runner.py \
+	$(TRITON_ENV) $(VENV_PYTHON) tests/models/generate_model_runner.py \
 		--spec module \
 		--module-file $(RESNET_MODEL_FILE) \
 		--batch $(RESNET_BATCH) \
@@ -107,7 +121,7 @@ $(RESNET_RUNNER): $(RESNET_RUNNER_SRC)
 
 $(GPT2_RUNNER_SRC): venv
 	mkdir -p $(GPT2_DIR)
-	$(VENV_PYTHON) tests/models/generate_model_runner.py \
+	$(TRITON_ENV) $(VENV_PYTHON) tests/models/generate_model_runner.py \
 		--spec module \
 		--module-file $(GPT2_MODEL_FILE) \
 		--seq-len $(GPT2_SEQ_LEN) \

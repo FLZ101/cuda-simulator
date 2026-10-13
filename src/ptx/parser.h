@@ -22,6 +22,7 @@ private:
   std::string read_until_semicolon();
   std::string read_until_newline();
   void skip_newlines();
+  void skip_function();
   void parse_directive(Module &module);
   Function parse_function(Module &module);
   Instruction parse_instruction();

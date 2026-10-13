@@ -30,6 +30,8 @@ set(CMAKE_CUDA_COMPILER "${CUDAToolkit_NVCC_EXECUTABLE}")
 enable_language(CUDA)
 
 option(CUDA_SIM_ENABLE_SANITIZERS "Enable AddressSanitizer and UndefinedBehaviorSanitizer" OFF)
+set(CUDA_SIM_MODEL_GEN_JOBS "1" CACHE STRING
+  "Maximum number of concurrent generate_model_runner.py jobs")
 
 add_subdirectory(src)
 
