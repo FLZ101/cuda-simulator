@@ -12,6 +12,7 @@ Additional documentation:
 - [CUDA_PROGRAMMING_MODEL.md](CUDA_PROGRAMMING_MODEL.md)
 - [GPU_MODEL.md](GPU_MODEL.md)
 - [CUDA_BEST_PRACTICES.md](CUDA_BEST_PRACTICES.md)
+- [NATIVE_JIT.md](NATIVE_JIT.md)
 
 ## Requirements
 

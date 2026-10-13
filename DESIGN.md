@@ -1258,20 +1258,20 @@ Logits are FP32 C-order with shape `(sequence_length, vocab_size)`.
 
 ### Step 11: Native Backend, Throughput, and Multi-SM
 
-Add:
+Implemented:
 
 - PTX IR to generated C++ lowering
 - external host-compiler shared-object compilation
 - disk-cached native functions
 - interpreter fallback
-- global block scheduler with SM worker threads
+- per-launch block-parallel execution with `CUDA_SIM_EXEC_THREADS` workers
 
 Files:
 
 ```text
-src/ptx/lower.*
 src/jit/ptx_to_cpp.*
 src/jit/native_backend.*
+src/exec/executor.cpp
 src/compat/cuda_shim.cpp
 ```
 
@@ -1281,6 +1281,9 @@ Native backend rule:
 - `bar.sync`, shared memory, atomics, and unsupported instructions fall back to
   the interpreter.
 - The interpreter remains the correctness oracle.
+
+The detailed design and implementation notes for the native backend are in
+[NATIVE_JIT.md](NATIVE_JIT.md).
 
 Multi-SM rule:
 
@@ -1309,9 +1312,9 @@ lower once -> PTX IR -> generated C++ -> external c++ -O3 -shared ->
 The interpreter remains the correctness oracle. The native backend is
 attempted first for kernels that can be lowered safely and falls back to the
 interpreter for shared memory, barriers, atomics, or unsupported
-instructions. The full-size FP32 `1 x 3 x 224 x 224` ResNet-50 run must meet
-a recorded wall-time gate while matching both the PyTorch CPU reference and
-real-GPU reference within existing FP32 tolerances and argmax.
+instructions. The full-size FP32 `1 x 3 x 224 x 224` ResNet-50 run is the
+recorded wall-time gate: it completes in 247.70 seconds and matches the
+PyTorch CPU reference within existing FP32 tolerances and argmax.
 
 ### Step 12: Compatibility Hardening
 
@@ -1389,8 +1392,10 @@ cuda-simulator/
       coalescer.cpp
       atomics.cpp
     jit/
-      llvm_backend.cpp
-      function_cache.cpp
+      ptx_to_cpp.h
+      ptx_to_cpp.cpp
+      native_backend.h
+      native_backend.cpp
   tests/
     compat/
     differential/

@@ -26,6 +26,9 @@ compilation, loading, or execution fails, or when the kernel uses shared
 memory/barriers/unsupported instructions, `Executor` falls back to the existing
 interpreter.
 
+Detailed backend design and implementation notes live in
+[`NATIVE_JIT.md`](../NATIVE_JIT.md).
+
 ### Architecture
 
 - `src/jit/ptx_to_cpp.*`

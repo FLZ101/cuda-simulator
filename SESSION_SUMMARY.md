@@ -65,6 +65,7 @@ PTX only (never CUBIN/SASS). v1 correctness targets:
   `tests/models/specs/`, CPU-reference comparison in
   `tests/models/compare_torch_reference.py`.
 - Design and rules: `DESIGN.md`, `AGENTS.md`, `steps/STEP_08.md`.
+- Native backend design and implementation: `NATIVE_JIT.md`.
 
 ## Reference Policy
 
