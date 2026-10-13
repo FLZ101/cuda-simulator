@@ -142,7 +142,7 @@ cuda_sim_run \
 | `runtime` | Devices, contexts, streams, events, memory |
 | `exec` | Blocks, warps, SIMT instructions, divergence, barriers |
 | `mem` | Device memory, address translation, coalescing, atomics |
-| `jit` | Optional LLVM JIT for hot PTX functions |
+| `jit` | Native PTX-to-C++ backend with disk cache and interpreter fallback |
 
 ## 6. Minimum CUDA API Surface
 
@@ -364,7 +364,7 @@ Registers use a structure-of-arrays layout:
 register R -> lane[0], lane[1], ..., lane[31]
 ```
 
-This layout is required for later vectorized/JIT execution.
+This layout is required for the native generated-code backend and later vectorized execution.
 
 PTX operands such as `%r716`, `%rd91`, and `%f31` are virtual register names
 emitted by NVVM. They are not physical GPU register-file indices. Aggressive
@@ -499,7 +499,7 @@ The lowerer:
 - identifies variable declarations and sizes
 - keeps source locations for diagnostics
 
-The interpreter and JIT consume the IR, never the AST directly.
+The interpreter and native backend consume the IR, never the AST directly.
 
 ## 10. PTX Instruction Coverage
 
@@ -634,13 +634,17 @@ Current status:
 
 - Steps 0 through 8 are implemented and recorded in `steps/STEP_00.md` through
   `steps/STEP_08.md`.
-- Step 9 is in progress in `steps/STEP_09.md`; the small-shape ResNet-50
-  simulator forward pass is green.
-- Step 10 is in progress in `steps/STEP_10.md`; embedding, causal attention,
+- Step 9 is complete in `steps/STEP_09.md`; the full-size ResNet-50 simulator
+  forward pass is green after the Step 11 native backend landed.
+- Step 10 is complete in `steps/STEP_10.md`; embedding, causal attention,
   transformer-block, and a full pretrained GPT-2 stack with position embeddings
   and LM head are green. The 124M/12-block PyTorch CPU reference and native-GPU
-  runner match with argmax comparison; the full 12-block interpreter gate
-  remains a long-running manual target.
+  runner match with argmax comparison; the full 12-block interpreter gate is
+  deferred to the Step 11 performance work.
+- Step 11 is complete in `steps/STEP_11.md`. A native PTX-to-C++ backend with
+  a disk cache and interpreter fallback is integrated; the full-size
+  `1 x 3 x 224 x 224` ResNet-50 simulator run passes in 247.70s and matches
+  the PyTorch CPU reference.
 - Step 8's `nvcc` operator execution qualification is implemented and green:
   generated kernels are grouped into operator families and tested through one
   CTest target per group with the real GPU as golden reference, including
@@ -675,7 +679,7 @@ Decisions:
 
 - C++20, CMake 3.24 or newer.
 - `-Wall -Wextra -Wpedantic`, warnings are errors.
-- LLVM JIT is optional via `CUDA_SIM_ENABLE_JIT`.
+- The native backend uses the external host compiler and disk cache; no LLVM dependency is required.
 - Outputs: `libcudart_shim.so`, `libcuda_shim.so`, `libcudasim_core.so`,
   `cuda_sim_run`, `cuda_sim_tests`.
 
@@ -1252,33 +1256,31 @@ python3 tests/models/gpt2_compare.py \
 
 Logits are FP32 C-order with shape `(sequence_length, vocab_size)`.
 
-### Step 11: Reduced Precision, JIT, and Multi-SM
+### Step 11: Native Backend, Throughput, and Multi-SM
 
 Add:
 
-- FP16/BF16 host types and conversions
-- packed `f16x2`/`bf16x2`
-- LLVM OrcJIT lowering
-- function cache
+- PTX IR to generated C++ lowering
+- external host-compiler shared-object compilation
+- disk-cached native functions
 - interpreter fallback
 - global block scheduler with SM worker threads
 
 Files:
 
 ```text
-src/exec/half.h
-src/exec/bfloat16.h
 src/ptx/lower.*
-src/jit/llvm_backend.*
-src/jit/vector_types.h
-src/jit/function_cache.*
+src/jit/ptx_to_cpp.*
+src/jit/native_backend.*
+src/compat/cuda_shim.cpp
 ```
 
-JIT rule:
+Native backend rule:
 
-- The `<32 x type>` lane mapping is the fast path for warp-uniform control flow.
-- Divergent branches, barriers, and unsupported instructions fall back to the
-  interpreter.
+- Generated C++ is compiled with `c++ -O3 -march=native -fPIC -shared`.
+- `bar.sync`, shared memory, atomics, and unsupported instructions fall back to
+  the interpreter.
+- The interpreter remains the correctness oracle.
 
 Multi-SM rule:
 
@@ -1294,6 +1296,22 @@ GPT-2 124M, 16 tokens, FP32: < 600 seconds
 ```
 
 These are planning numbers, not correctness gates.
+
+Full-size ResNet-50 performance is tracked separately because it is the
+current end-to-end simulator bottleneck. The plan in `steps/STEP_11.md` works
+through, in order:
+
+```text
+lower once -> PTX IR -> generated C++ -> external c++ -O3 -shared ->
+.cache/cudasim-native -> dlopen -> execute grid blocks -> interpreter fallback
+```
+
+The interpreter remains the correctness oracle. The native backend is
+attempted first for kernels that can be lowered safely and falls back to the
+interpreter for shared memory, barriers, atomics, or unsupported
+instructions. The full-size FP32 `1 x 3 x 224 x 224` ResNet-50 run must meet
+a recorded wall-time gate while matching both the PyTorch CPU reference and
+real-GPU reference within existing FP32 tolerances and argmax.
 
 ### Step 12: Compatibility Hardening
 
@@ -1391,4 +1409,5 @@ cuda-simulator/
 - `LD_PRELOAD` behavior must be verified against versioned CUDA SONAMEs.
 - Fatbin layout varies across CUDA toolchains.
 - NVIDIA approximate math can differ from host libm.
-- A naive interpreter will be too slow; JIT and multi-SM are required.
+- A naive interpreter will be too slow; the native generated-code backend and
+  block-parallel execution are required.

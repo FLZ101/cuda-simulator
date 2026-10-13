@@ -22,6 +22,8 @@ add_library(cudasim_core SHARED
   ../loader/fatbin.cpp
   ../loader/module_registry.cpp
   ../exec/executor.cpp
+  ../jit/ptx_to_cpp.cpp
+  ../jit/native_backend.cpp
   ../mem/device_memory.cpp
   ../mem/coalescer.cpp
   ../mem/atomics.cpp

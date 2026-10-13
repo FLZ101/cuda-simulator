@@ -50,7 +50,6 @@ CUDA_SIM_EXEC_THREADS ?= auto
 CMAKE_FLAGS := \
 	-DCMAKE_BUILD_TYPE=$(CMAKE_BUILD_TYPE) \
 	-DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
-	-DCUDA_SIM_ENABLE_JIT=OFF \
 	-DCUDA_SIM_ENABLE_SANITIZERS=OFF
 
 .PHONY: all build configure test run clean help precommit format format-python venv compile_commands resnet-cpu resnet-gpu resnet-gpu-cudasim gpt2-cpu gpt2-gpu gpt2-gpu-cudasim

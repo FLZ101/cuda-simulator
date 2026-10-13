@@ -2,6 +2,7 @@
 
 #include "runtime/memory.h"
 
+#include <algorithm>
 #include <cstring>
 
 namespace cudasim::core {
@@ -23,7 +24,10 @@ const DeviceInfo &CompatState::device_info() const {
   const auto &props =
       cudasim::runtime::DeviceRegistry::instance().device(0).properties();
   static DeviceInfo info;
-  std::strncpy(info.name, props.name, sizeof(info.name) - 1);
+  const std::size_t source_len = ::strnlen(props.name, sizeof(props.name));
+  const std::size_t copy_len = std::min(source_len, sizeof(info.name) - 1);
+  std::memcpy(info.name, props.name, copy_len);
+  info.name[copy_len] = '\0';
   info.major = props.major;
   info.minor = props.minor;
   info.multi_processor_count = props.multi_processor_count;

@@ -11,7 +11,9 @@
 #include <atomic>
 #include <cstddef>
 #include <cstring>
+#include <map>
 #include <memory>
+#include <mutex>
 #include <vector>
 
 namespace {
@@ -26,6 +28,19 @@ CUresult result(bool ok, CUresult failure) {
 }
 
 void *dummy_handle() { return reinterpret_cast<void *>(1); }
+
+const cudasim::ptx::ModuleIR &
+lowered_module(const cudasim::ptx::Module *module) {
+  static std::mutex mutex;
+  static std::map<const cudasim::ptx::Module *, cudasim::ptx::ModuleIR> cache;
+
+  std::lock_guard<std::mutex> lock(mutex);
+  const auto it = cache.find(module);
+  if (it != cache.end()) {
+    return it->second;
+  }
+  return cache.emplace(module, cudasim::ptx::lower(*module)).first->second;
+}
 
 std::shared_ptr<cudasim::runtime::Stream> get_stream(CUstream stream) {
   const auto handle = reinterpret_cast<std::uintptr_t>(stream);
@@ -616,7 +631,7 @@ cuLaunchKernel(CUfunction function, unsigned int grid_x, unsigned int grid_y,
     return result(false, CUDA_ERROR_NOT_SUPPORTED);
   }
 
-  cudasim::ptx::ModuleIR ir = cudasim::ptx::lower(*owner);
+  const cudasim::ptx::ModuleIR &ir = lowered_module(owner);
   if (ir.functions.empty()) {
     return result(false, CUDA_ERROR_NOT_SUPPORTED);
   }

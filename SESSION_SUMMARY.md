@@ -34,13 +34,24 @@ PTX only (never CUBIN/SASS). v1 correctness targets:
   (`tests/models/specs/_common.py`) generates the C++ from a `Runner`
   description. `vector_add`, `matmul`, and `mlp` are declarative `build_runner`
   specs; `module.py` is the generic FX-traced converter.
-- **Step 10 checkpoints 1-5**: `tests/models/specs/module.py` now lowers
+- **Step 10 complete**: `tests/models/specs/module.py` now lowers
   traced `nn.Embedding`, `causal_softmax`, wrapped `multihead_attention`, and
   `position_ids`/`arange` calls to SIMT PTX kernels. The full GPT-2 stack uses
   the cached Hugging Face `gpt2` pretrained weights mapped into the traced
   custom stack. The full 124M/12-block pretrained CPU reference and native-GPU
   runner pass with argmax comparison; a pretrained zero-layer simulator probe
-  keeps the default CTest simulator gate bounded.
+  keeps the default CTest simulator gate bounded. The full interpreter run is
+  deferred to Step 11 throughput improvements.
+- **Step 11 complete**: `steps/STEP_11.md` records the native PTX-to-C++
+  backend. `src/jit/ptx_to_cpp.*` lowers a `FunctionIR` to self-contained C++
+  with per-function register/predicate array sizing; `src/jit/native_backend.*`
+  compiles it with the host `c++ -O3 -march=native`, caches the shared object
+  under `.cache/cudasim-native`, loads it with `dlopen`, and runs independent
+  grid blocks on `CUDA_SIM_EXEC_THREADS` workers. `Executor::execute` tries
+  this path first and falls back to the interpreter for shared memory,
+  barriers, atomics, translation/compile failures, or execution failures. The
+  full-size `1 x 3 x 224 x 224` ResNet-50 simulator run passes in 247.70s and
+  matches the PyTorch CPU reference.
 
 ## Where Things Live
 
@@ -84,10 +95,12 @@ PTX only (never CUBIN/SASS). v1 correctness targets:
 
 ## Tasks / Next Steps
 
-1. Replace the fixed 1024-per-bank register banks with a
-   `.reg`-declaration-driven `RegisterLayout` once a generated kernel exceeds
-   current capacity.
-2. Finish the full 124M/12-block interpreter gate once throughput improves;
-   the pretrained CPU reference, real-GPU comparison, argmax check, and
-   zero-layer simulator probe are already green.
+1. Add bounds checking to native and interpreter global-memory accesses to
+   preserve the project memory-safety rule.
+2. Replace the fixed 1024-per-bank register arrays with a
+   `.reg`-declaration-driven layout once a generated kernel exceeds current
+   capacity.
 3. Add missing PTX semantics as newly generated kernels expose them.
+4. Finish the full 124M/12-block simulator gate now that the ResNet-50
+   throughput gate is green; the pretrained CPU reference, real-GPU
+   comparison, argmax check, and zero-layer simulator probe are already green.

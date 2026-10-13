@@ -175,9 +175,11 @@ module simulator mode passed
 ```
 
 The small-shape simulator forward pass and the relevant PTX regressions are
-green. Full `1 x 3 x 224 x 224` simulator execution and the
-`models.resnet50.runner_(cpu|sim)` CTest targets are still pending.
+green. Full `1 x 3 x 224 x 224` simulator execution is now green after the
+Step 11 native backend landed; it completes in 247.70s and matches the CPU
+reference. The `models.resnet50.runner_(cpu|sim)` CTest targets are still
+covered by the Makefile model targets.
 
 ## Status
 
-in progress
+complete

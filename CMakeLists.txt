@@ -29,13 +29,7 @@ message(STATUS "GPU detected: ${NVIDIA_GPU_NAME}")
 set(CMAKE_CUDA_COMPILER "${CUDAToolkit_NVCC_EXECUTABLE}")
 enable_language(CUDA)
 
-option(CUDA_SIM_ENABLE_JIT "Enable the optional LLVM JIT backend" OFF)
 option(CUDA_SIM_ENABLE_SANITIZERS "Enable AddressSanitizer and UndefinedBehaviorSanitizer" OFF)
-
-if(CUDA_SIM_ENABLE_JIT)
-  find_package(LLVM REQUIRED CONFIG)
-  message(STATUS "CUDA simulator JIT enabled with LLVM ${LLVM_PACKAGE_VERSION}")
-endif()
 
 add_subdirectory(src)
 

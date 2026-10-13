@@ -210,6 +210,10 @@ Reference constraints:
 - verification: `ctest --test-dir build -R 'models\.'
   --output-on-failure` passes, including the full pretrained real-GPU run and
   the pretrained simulator probe.
+- Marked Step 10 complete and deferred the full 12-block interpreter gate to
+  the Step 11 performance plan.
+- files: `steps/STEP_10.md`, `DESIGN.md`, `SESSION_SUMMARY.md`
+- verification: No build or test required.
 
 ## Verification
 
@@ -227,4 +231,4 @@ is improved.
 
 ## Status
 
-in progress
+complete

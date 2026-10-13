@@ -4,6 +4,7 @@
 #include "loader/module_registry.h"
 #include "runtime/runtime.h"
 
+#include <algorithm>
 #include <atomic>
 #include <cstddef>
 #include <cstring>
@@ -25,7 +26,10 @@ cudaError_t result(bool ok, cudaError_t failure) {
 void fill_device_properties(cudaDeviceProp *props) {
   const auto &info = cudasim::core::CompatState::instance().device_info();
   std::memset(props, 0, sizeof(*props));
-  std::strncpy(props->name, info.name, sizeof(props->name) - 1);
+  const std::size_t source_len = ::strnlen(info.name, sizeof(info.name));
+  const std::size_t copy_len = std::min(source_len, sizeof(props->name) - 1);
+  std::memcpy(props->name, info.name, copy_len);
+  props->name[copy_len] = '\0';
   props->major = info.major;
   props->minor = info.minor;
   props->multiProcessorCount = info.multi_processor_count;

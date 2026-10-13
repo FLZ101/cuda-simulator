@@ -2,6 +2,7 @@
 
 #include "exec/block.h"
 #include "exec/register_file.h"
+#include "jit/native_backend.h"
 #include "mem/atomics.h"
 #include "mem/coalescer.h"
 #include "ptx/lexer.h"
@@ -2192,6 +2193,10 @@ bool Executor::execute(const cudasim::ptx::FunctionIR &function,
                        const LaunchConfig &config,
                        const std::vector<std::uint8_t> &arguments,
                        const std::vector<cudasim::ptx::VariableIR> &variables) {
+  if (cudasim::jit::try_execute(function, config, arguments, variables)) {
+    return true;
+  }
+
   std::unordered_map<std::string, std::size_t> shared_offsets;
   std::size_t shared_bytes = 0;
   for (const auto &variable : variables) {

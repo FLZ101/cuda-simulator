@@ -21,7 +21,7 @@ Additional documentation:
 - CUDA toolkit with `nvcc`
 - CUDA-capable GPU with `nvidia-smi`
 - clang-format
-- optional LLVM development package when `CUDA_SIM_ENABLE_JIT=ON`
+- host C++ compiler with `-march=native` support for generated native kernels
 
 WSL2 works like a native Linux distro for the CUDA toolkit: install the
 toolkit inside the Linux filesystem; the GPU driver is supplied by the Windows
@@ -57,7 +57,6 @@ Direct CMake configuration is still available:
 ```bash
 cmake -S . -B build -G Ninja \
   -DCMAKE_BUILD_TYPE=Debug \
-  -DCUDA_SIM_ENABLE_JIT=OFF \
   -DCUDA_SIM_ENABLE_SANITIZERS=OFF
 cmake --build build
 ctest --test-dir build --output-on-failure

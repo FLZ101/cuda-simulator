@@ -1,4 +1,4 @@
-build/
+/build*/
 .cache/
 .venv/
 compile_commands.json
