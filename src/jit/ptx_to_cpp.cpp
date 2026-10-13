@@ -505,6 +505,7 @@ public:
     }
 
     if (flat_.empty()) {
+      failure_reason_ = "function has no instructions";
       return std::nullopt;
     }
 
@@ -558,6 +559,9 @@ public:
 
     for (std::size_t i = 0; i < flat_.size(); ++i) {
       if (!emit_instruction(i, flat_[i])) {
+        failure_reason_ = "unsupported PTX instruction at pc " +
+                          std::to_string(i) + ": " + flat_[i].opcode + " " +
+                          flat_[i].operands;
         return std::nullopt;
       }
     }
@@ -571,6 +575,8 @@ public:
     out_ << "}\n";
     return out_.str();
   }
+
+  const std::string &failure_reason() const { return failure_reason_; }
 
 private:
   std::string preamble(std::size_t register_count,
@@ -1360,9 +1366,9 @@ extern "C" int cudasim_native_kernel(const unsigned char *args,
     body_.str("");
     body_.clear();
     std::ostringstream &body = body_;
-    body << "R[" << dst->index << "][lane] = f32_to_u64("
-         << "std::fma(" << f32_expression(*a) << ", " << f32_expression(*b)
-         << ", " << f32_expression(*c) << "));\n";
+    body << "R[" << dst->index << "][lane] = f32_to_u64(" << "std::fma("
+         << f32_expression(*a) << ", " << f32_expression(*b) << ", "
+         << f32_expression(*c) << "));\n";
     return true;
   }
 
@@ -1572,13 +1578,20 @@ extern "C" int cudasim_native_kernel(const unsigned char *args,
   std::vector<FlatInstruction> flat_;
   std::ostringstream body_;
   std::ostringstream out_;
+  std::string failure_reason_;
 };
 
 } // namespace
 
 std::optional<std::string>
-generate_native_source(const cudasim::ptx::FunctionIR &function) {
-  return Codegen(function).generate();
+generate_native_source(const cudasim::ptx::FunctionIR &function,
+                       std::string *failure_reason) {
+  Codegen codegen(function);
+  auto source = codegen.generate();
+  if (!source && failure_reason != nullptr) {
+    *failure_reason = codegen.failure_reason();
+  }
+  return source;
 }
 
 } // namespace cudasim::jit

@@ -12,6 +12,7 @@ namespace cudasim::jit {
 // generated program exports `cudasim_native_kernel` and expects the ABI used
 // by native_backend.cpp.
 std::optional<std::string>
-generate_native_source(const cudasim::ptx::FunctionIR &function);
+generate_native_source(const cudasim::ptx::FunctionIR &function,
+                       std::string *failure_reason = nullptr);
 
 } // namespace cudasim::jit

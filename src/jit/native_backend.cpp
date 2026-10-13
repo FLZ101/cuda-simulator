@@ -15,6 +15,7 @@
 #include <string>
 #include <thread>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 namespace cudasim::jit {
@@ -50,6 +51,24 @@ std::size_t executor_thread_count() {
   } catch (...) {
     return 1;
   }
+}
+
+std::mutex &warning_mutex() {
+  static std::mutex mutex;
+  return mutex;
+}
+
+std::unordered_set<std::string> &warning_keys() {
+  static std::unordered_set<std::string> keys;
+  return keys;
+}
+
+void warn_once(const std::string &key, const std::string &message) {
+  std::lock_guard<std::mutex> lock(warning_mutex());
+  if (!warning_keys().insert(key).second) {
+    return;
+  }
+  std::cerr << message << '\n';
 }
 
 std::uint64_t fnv1a64(const std::string &text) {
@@ -199,6 +218,10 @@ bool try_execute(const cudasim::ptx::FunctionIR &function,
 
   for (const auto &variable : variables) {
     if (variable.space == "shared") {
+      warn_once("shared:" + function.name,
+                "simulator JIT: function '" + function.name +
+                    "' is not JITted because it uses shared memory; falling "
+                    "back to interpreter");
       return false;
     }
   }
@@ -214,6 +237,11 @@ bool try_execute(const cudasim::ptx::FunctionIR &function,
                                       : patterns.substr(begin, end - begin);
       if (!pattern.empty() &&
           function.name.find(pattern) != std::string::npos) {
+        warn_once("exclude:" + function.name,
+                  "simulator JIT: function '" + function.name +
+                      "' is not JITted because it matches "
+                      "CUDA_SIM_NATIVE_EXCLUDE pattern '" +
+                      pattern + "'; falling back to interpreter");
         return false;
       }
       if (end == std::string::npos) {
@@ -223,13 +251,22 @@ bool try_execute(const cudasim::ptx::FunctionIR &function,
     }
   }
 
-  auto source = generate_native_source(function);
+  std::string failure_reason;
+  auto source = generate_native_source(function, &failure_reason);
   if (!source) {
+    warn_once("generate:" + function.name,
+              "simulator JIT: function '" + function.name +
+                  "' is not JITted: " + failure_reason +
+                  "; falling back to interpreter");
     return false;
   }
 
   auto program = load_program(*source);
   if (!program) {
+    warn_once("load:" + function.name,
+              "simulator JIT: function '" + function.name +
+                  "' could not be compiled or loaded by the native backend; "
+                  "falling back to interpreter");
     return false;
   }
 
@@ -278,7 +315,14 @@ bool try_execute(const cudasim::ptx::FunctionIR &function,
     }
   }
 
-  return !failed.load(std::memory_order_relaxed);
+  if (failed.load(std::memory_order_relaxed)) {
+    warn_once(
+        "execute:" + function.name,
+        "simulator JIT: function '" + function.name +
+            "' failed during native execution; falling back to interpreter");
+    return false;
+  }
+  return true;
 }
 
 } // namespace cudasim::jit
