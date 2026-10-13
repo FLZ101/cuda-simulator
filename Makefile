@@ -39,7 +39,7 @@ CMAKE_FLAGS := \
 	-DCUDA_SIM_ENABLE_JIT=OFF \
 	-DCUDA_SIM_ENABLE_SANITIZERS=OFF
 
-.PHONY: all build configure test run clean help precommit format format-python venv compile_commands resnet-cpu resnet-gpu resnet-gpu-cudasim
+.PHONY: all build configure test run clean help precommit format format-python venv compile_commands resnet-cpu resnet-gpu resnet-gpu-cudasim gpt2-cpu gpt2-gpu gpt2-gpu-cudasim
 
 all: build
 
@@ -140,6 +140,15 @@ resnet-gpu-cudasim: resnet-cpu
 		--core-dir $(BUILD_DIR)/src/core \
 		--output-dir $(RESNET_DIR)
 
+gpt2-cpu: build
+	$(CTEST) --test-dir $(BUILD_DIR) -R 'models\.gpt2\.runner_cpu' --output-on-failure
+
+gpt2-gpu: build
+	$(CTEST) --test-dir $(BUILD_DIR) -R 'models\.gpt2\.(runner_cpu|runner_gpu)' --output-on-failure
+
+gpt2-gpu-cudasim: build
+	$(CTEST) --test-dir $(BUILD_DIR) -R 'models\.gpt2\.(runner_sim|zero_runner_cpu)' --output-on-failure
+
 clean:
 	rm -rf $(BUILD_DIR)
 
@@ -151,6 +160,9 @@ help:
 	@echo "  make resnet-cpu Run the pretrained ResNet-50 PyTorch CPU reference"
 	@echo "  make resnet-gpu Run ResNet-50 on the real GPU and compare to CPU"
 	@echo "  make resnet-gpu-cudasim Run ResNet-50 through the CUDA simulator"
+	@echo "  make gpt2-cpu Run the pretrained GPT-2 PyTorch CPU reference"
+	@echo "  make gpt2-gpu Run GPT-2 on the real GPU and compare to CPU"
+	@echo "  make gpt2-gpu-cudasim Run the pretrained GPT-2 embedding/LM-head probe through the CUDA simulator"
 	@echo "  make compile_commands  Generate root compile_commands.json"
 	@echo "  make venv          Bootstrap .venv and install all dependencies"
 	@echo "  make precommit      Run pre-commit on all files"
