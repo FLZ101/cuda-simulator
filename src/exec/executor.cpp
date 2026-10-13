@@ -1507,7 +1507,7 @@ ExecStatus execute_instruction(
     return ExecStatus::Continue;
   }
 
-  if (opcode == "shr.s16" || opcode == "shr.u16") {
+  if (opcode == "shl.b16" || opcode == "shr.s16" || opcode == "shr.u16") {
     std::size_t pos = 0;
     auto dst = parse_register(instruction.operand_tokens, pos);
     auto src = parse_register(instruction.operand_tokens, pos);
@@ -1537,6 +1537,9 @@ ExecStatus execute_instruction(
     if (opcode == "shr.u16") {
       registers.values[dst->index][lane] =
           static_cast<std::uint16_t>(value >> amount);
+    } else if (opcode == "shl.b16") {
+      registers.values[dst->index][lane] =
+          static_cast<std::uint16_t>(value << amount);
     } else {
       registers.values[dst->index][lane] = static_cast<std::uint16_t>(
           static_cast<std::int32_t>(static_cast<std::int16_t>(value)) >>
@@ -1854,7 +1857,7 @@ ExecStatus execute_instruction(
     return ExecStatus::Continue;
   }
 
-  if (opcode == "add.s16") {
+  if (opcode == "add.s16" || opcode == "sub.s16") {
     std::size_t pos = 0;
     auto dst = parse_register(instruction.operand_tokens, pos);
     auto a =
@@ -1864,7 +1867,8 @@ ExecStatus execute_instruction(
     if (!dst || !a || !b) {
       return ExecStatus::Error;
     }
-    registers.values[dst->index][lane] = (*a + *b) & 0xFFFFU;
+    registers.values[dst->index][lane] =
+        opcode == "add.s16" ? ((*a + *b) & 0xFFFFU) : ((*a - *b) & 0xFFFFU);
     next_pc = pc + 1;
     return ExecStatus::Continue;
   }
@@ -2055,6 +2059,30 @@ ExecStatus execute_instruction(
       return ExecStatus::Error;
     }
     registers.values[dst->index][lane] = *src & 0xFFFFU;
+    next_pc = pc + 1;
+    return ExecStatus::Continue;
+  }
+
+  if (opcode == "cvt.u32.u16" || opcode == "cvt.s8.s32" ||
+      opcode == "cvt.s16.s8" || opcode == "cvt.s32.s8") {
+    std::size_t pos = 0;
+    auto dst = parse_register(instruction.operand_tokens, pos);
+    auto src =
+        parse_u32_operand(instruction.operand_tokens, pos, registers, lane);
+    if (!dst || !src) {
+      return ExecStatus::Error;
+    }
+    if (opcode == "cvt.u32.u16") {
+      registers.values[dst->index][lane] = *src & 0xFFFFU;
+    } else if (opcode == "cvt.s8.s32") {
+      registers.values[dst->index][lane] = *src & 0xFFU;
+    } else if (opcode == "cvt.s16.s8") {
+      registers.values[dst->index][lane] = static_cast<std::uint64_t>(
+          static_cast<std::int16_t>(static_cast<std::int8_t>(*src & 0xFFU)));
+    } else {
+      registers.values[dst->index][lane] = static_cast<std::uint64_t>(
+          static_cast<std::int32_t>(static_cast<std::int8_t>(*src & 0xFFU)));
+    }
     next_pc = pc + 1;
     return ExecStatus::Continue;
   }

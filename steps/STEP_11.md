@@ -163,3 +163,17 @@ make precommit
 - verification: `make gpt2-gpu-cudasim` passes with the default
   `50257/768/12/12` configuration, reporting `PyTorch CPU reference matches
   (50257 floats); argmax matches (198)`.
+
+- Added JIT lowering for CUDA 12/Triton 2.2 GPT-2 opcodes that previously
+  forced the 12 `multihead_attention_*` kernels to the interpreter:
+  `cvt.u16.u32`, `shr.s16`, `shr.u16`, `add.s16`, `mul.wide.s16`, `selp.f32`,
+  and negative `mov.pred` immediates. Also covered small-model opcodes
+  `and.b16`, `sub.s16`, `shl.b16`, `cvt.u32.u16`, `cvt.s8.s32`, `cvt.s16.s8`,
+  and `cvt.s32.s8`.
+- files: `src/jit/ptx_to_cpp.cpp`, `src/exec/executor.cpp`,
+  `tests/CMakeLists.txt`,
+  `tests/ptx/selp_f32_exec_smoke.cpp`, `tests/ptx/selp_f32_kernel.ptx`
+- verification: `ctest --test-dir build -R
+  '^ptx\.(cvt_u16_u32_exec_smoke|mov_pred_exec_smoke|selp_f32_exec_smoke)$'
+  --output-on-failure` passes; `models.gpt2_multihead.runner_sim` passes; all
+  150 generated GPT-2 entry kernels now have JIT-supported opcode coverage.

@@ -1008,10 +1008,19 @@ extern "C" int cudasim_native_kernel(const unsigned char *args,
     std::string expression;
     if (opcode == "add.s32" || opcode == "add.u32") {
       expression = u32_expression(*a) + " + " + u32_expression(*b);
+    } else if (opcode == "add.s16") {
+      expression = "((" + u32_expression(*a) + " + " + u32_expression(*b) +
+                   ") & 0xFFFFu)";
     } else if (opcode == "sub.s32" || opcode == "sub.u32") {
       expression = u32_expression(*a) + " - " + u32_expression(*b);
+    } else if (opcode == "sub.s16") {
+      expression = "((" + u32_expression(*a) + " - " + u32_expression(*b) +
+                   ") & 0xFFFFu)";
     } else if (opcode == "and.b32") {
       expression = u32_expression(*a) + " & " + u32_expression(*b);
+    } else if (opcode == "and.b16") {
+      expression = "((" + u32_expression(*a) + " & " + u32_expression(*b) +
+                   ") & 0xFFFFu)";
     } else if (opcode == "or.b32") {
       expression = u32_expression(*a) + " | " + u32_expression(*b);
     } else if (opcode == "xor.b32") {
@@ -1131,6 +1140,35 @@ extern "C" int cudasim_native_kernel(const unsigned char *args,
     return true;
   }
 
+  bool emit_shift_16(const FlatInstruction &instruction) {
+    std::size_t pos = 0;
+    auto dst = parse_register(instruction.operand_tokens, pos);
+    auto a = parse_integer_operand(instruction.operand_tokens, pos);
+    auto b = parse_integer_operand(instruction.operand_tokens, pos);
+    if (!dst || !a || !b) {
+      return false;
+    }
+    std::string expression;
+    if (instruction.opcode == "shl.b16") {
+      expression = "static_cast<uint16_t>((" + u32_expression(*a) +
+                   ") & 0xFFFFu) << " + u32_expression(*b);
+    } else if (instruction.opcode == "shr.u16") {
+      expression = "static_cast<uint16_t>((" + u32_expression(*a) +
+                   ") & 0xFFFFu) >> " + u32_expression(*b);
+    } else {
+      expression = "static_cast<uint16_t>(static_cast<int32_t>("
+                   "static_cast<int16_t>((" +
+                   u32_expression(*a) + ") & 0xFFFFu)) >> " +
+                   u32_expression(*b) + ")";
+    }
+    body_.str("");
+    body_.clear();
+    std::ostringstream &body = body_;
+    body << "R[" << dst->index << "][lane] = static_cast<uint64_t>("
+         << expression << ");\n";
+    return true;
+  }
+
   bool emit_wide_mul(const FlatInstruction &instruction) {
     std::size_t pos = 0;
     auto dst = parse_register(instruction.operand_tokens, pos);
@@ -1144,6 +1182,13 @@ extern "C" int cudasim_native_kernel(const unsigned char *args,
       expression = "static_cast<uint64_t>(static_cast<int64_t>(" +
                    i32_expression(*a) + ") * static_cast<int64_t>(" +
                    i32_expression(*b) + "))";
+    } else if (instruction.opcode == "mul.wide.s16") {
+      expression = "static_cast<uint64_t>(static_cast<int64_t>("
+                   "static_cast<int16_t>((" +
+                   u32_expression(*a) +
+                   ") & 0xFFFFu)) * "
+                   "static_cast<int64_t>(static_cast<int16_t>((" +
+                   u32_expression(*b) + ") & 0xFFFFu)))";
     } else if (instruction.opcode == "mul.wide.u32") {
       expression = "static_cast<uint64_t>(static_cast<uint64_t>(" +
                    u32_expression(*a) + ") * static_cast<uint64_t>(" +
@@ -1223,6 +1268,23 @@ extern "C" int cudasim_native_kernel(const unsigned char *args,
     } else if (opcode == "cvt.u32.u64") {
       expression = "static_cast<uint64_t>(static_cast<uint32_t>(" +
                    u64_expression(*src) + "))";
+    } else if (opcode == "cvt.u16.u32") {
+      expression =
+          "static_cast<uint64_t>((" + u32_expression(*src) + ") & 0xFFFFu)";
+    } else if (opcode == "cvt.u32.u16") {
+      expression =
+          "static_cast<uint64_t>((" + u32_expression(*src) + ") & 0xFFFFu)";
+    } else if (opcode == "cvt.s8.s32") {
+      expression =
+          "static_cast<uint64_t>((" + u32_expression(*src) + ") & 0xFFu)";
+    } else if (opcode == "cvt.s16.s8") {
+      expression = "static_cast<uint64_t>(static_cast<int16_t>("
+                   "static_cast<int8_t>((" +
+                   u32_expression(*src) + ") & 0xFFu)))";
+    } else if (opcode == "cvt.s32.s8") {
+      expression = "static_cast<uint64_t>(static_cast<int32_t>("
+                   "static_cast<int8_t>((" +
+                   u32_expression(*src) + ") & 0xFFu)))";
     } else if (opcode == "cvta.to.global.u64") {
       expression = u64_expression(*src);
     } else {
@@ -1316,6 +1378,24 @@ extern "C" int cudasim_native_kernel(const unsigned char *args,
     } else {
       return false;
     }
+    return true;
+  }
+
+  bool emit_selp_f32(const FlatInstruction &instruction) {
+    std::size_t pos = 0;
+    auto dst = parse_register(instruction.operand_tokens, pos);
+    auto a = parse_float_operand(instruction.operand_tokens, pos);
+    auto b = parse_float_operand(instruction.operand_tokens, pos);
+    auto predicate = parse_predicate_index(instruction.operand_tokens, pos);
+    if (!dst || !a || !b || !predicate || instruction.opcode != "selp.f32") {
+      return false;
+    }
+    body_.str("");
+    body_.clear();
+    std::ostringstream &body = body_;
+    body << "R[" << dst->index << "][lane] = f32_to_u64(P[" << *predicate
+         << "][lane] ? " << f32_expression(*a) << " : " << f32_expression(*b)
+         << ");\n";
     return true;
   }
 
@@ -1417,10 +1497,17 @@ extern "C" int cudasim_native_kernel(const unsigned char *args,
              instruction.operand_tokens[pos].kind == TokenKind::Comma) {
         ++pos;
       }
+      bool negative = false;
+      if (pos < instruction.operand_tokens.size() &&
+          instruction.operand_tokens[pos].kind == TokenKind::Minus) {
+        negative = true;
+        ++pos;
+      }
       if (pos < instruction.operand_tokens.size() &&
           instruction.operand_tokens[pos].kind == TokenKind::Number) {
         const bool value =
-            std::stoul(instruction.operand_tokens[pos].text, nullptr, 0) != 0;
+            std::stoull(instruction.operand_tokens[pos].text, nullptr, 0) != 0;
+        (void)negative;
         body << "P[" << *dst << "][lane] = " << (value ? "true" : "false")
              << ";\n";
       } else {
@@ -1499,6 +1586,8 @@ extern "C" int cudasim_native_kernel(const unsigned char *args,
       supported = emit_predicate_binary(instruction);
     } else if (opcode == "fma.rn.f32") {
       supported = emit_fma(instruction);
+    } else if (opcode == "selp.f32") {
+      supported = emit_selp_f32(instruction);
     } else if (opcode == "add.f32" || opcode == "add.rn.f32" ||
                opcode == "sub.f32" || opcode == "sub.rn.f32" ||
                opcode == "mul.f32" || opcode == "mul.rn.f32" ||
@@ -1512,12 +1601,13 @@ extern "C" int cudasim_native_kernel(const unsigned char *args,
                opcode == "ex2.approx.f32" || opcode == "ex2.approx.ftz.f32") {
       supported = emit_float_unary(instruction);
     } else if (opcode == "add.s32" || opcode == "add.u32" ||
-               opcode == "sub.s32" || opcode == "sub.u32" ||
-               opcode == "and.b32" || opcode == "or.b32" ||
-               opcode == "xor.b32" || opcode == "mul.lo.s32" ||
-               opcode == "mul.lo.u32" || opcode == "max.s32" ||
-               opcode == "min.s32" || opcode == "max.u32" ||
-               opcode == "min.u32") {
+               opcode == "add.s16" || opcode == "sub.s32" ||
+               opcode == "sub.u32" || opcode == "sub.s16" ||
+               opcode == "and.b32" || opcode == "and.b16" ||
+               opcode == "or.b32" || opcode == "xor.b32" ||
+               opcode == "mul.lo.s32" || opcode == "mul.lo.u32" ||
+               opcode == "max.s32" || opcode == "min.s32" ||
+               opcode == "max.u32" || opcode == "min.u32") {
       supported = emit_integer_binary(instruction);
     } else if (opcode == "neg.s32" || opcode == "not.b32" ||
                opcode == "abs.s32") {
@@ -1531,7 +1621,11 @@ extern "C" int cudasim_native_kernel(const unsigned char *args,
     } else if (opcode == "shl.b32" || opcode == "shr.u32" ||
                opcode == "shr.s32") {
       supported = emit_shift_32(instruction);
-    } else if (opcode == "mul.wide.s32" || opcode == "mul.wide.u32") {
+    } else if (opcode == "shl.b16" || opcode == "shr.u16" ||
+               opcode == "shr.s16") {
+      supported = emit_shift_16(instruction);
+    } else if (opcode == "mul.wide.s32" || opcode == "mul.wide.u32" ||
+               opcode == "mul.wide.s16") {
       supported = emit_wide_mul(instruction);
     } else if (opcode == "mul.hi.s32" || opcode == "mul.hi.u32") {
       supported = emit_mul_hi(instruction);
@@ -1540,7 +1634,10 @@ extern "C" int cudasim_native_kernel(const unsigned char *args,
     } else if (opcode == "mad.lo.s32") {
       supported = emit_mad_lo(instruction);
     } else if (opcode == "cvt.s64.s32" || opcode == "cvt.u64.u32" ||
-               opcode == "cvt.u32.u64" || opcode == "cvta.to.global.u64") {
+               opcode == "cvt.u32.u64" || opcode == "cvt.u16.u32" ||
+               opcode == "cvt.u32.u16" || opcode == "cvt.s8.s32" ||
+               opcode == "cvt.s16.s8" || opcode == "cvt.s32.s8" ||
+               opcode == "cvta.to.global.u64") {
       supported = emit_convert(instruction);
     } else if (opcode == "cvt.rzi.s32.f32" || opcode == "cvt.rzi.u32.f32" ||
                opcode == "cvt.rn.f32.s32" || opcode == "cvt.rn.f32.u32") {

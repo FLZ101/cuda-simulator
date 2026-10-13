@@ -550,6 +550,19 @@ cudasim_set_warnings(cvt_u16_u32_exec_smoke)
 cudasim_apply_sanitizers(cvt_u16_u32_exec_smoke)
 add_test(NAME ptx.cvt_u16_u32_exec_smoke COMMAND cvt_u16_u32_exec_smoke)
 
+add_executable(selp_f32_exec_smoke
+  ptx/selp_f32_exec_smoke.cpp
+)
+target_compile_features(selp_f32_exec_smoke PRIVATE cxx_std_20)
+target_include_directories(selp_f32_exec_smoke PRIVATE ${CMAKE_SOURCE_DIR}/src)
+target_link_libraries(selp_f32_exec_smoke PRIVATE cuda_shim)
+target_compile_definitions(selp_f32_exec_smoke PRIVATE
+  PTX_FIXTURE_PATH="${CMAKE_CURRENT_SOURCE_DIR}/ptx/selp_f32_kernel.ptx"
+)
+cudasim_set_warnings(selp_f32_exec_smoke)
+cudasim_apply_sanitizers(selp_f32_exec_smoke)
+add_test(NAME ptx.selp_f32_exec_smoke COMMAND selp_f32_exec_smoke)
+
 add_test(
   NAME ptx.simt_gate
   COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/generated/check_simt.py
