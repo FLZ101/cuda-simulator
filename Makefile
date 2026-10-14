@@ -1,5 +1,6 @@
 BUILD_DIR ?= build
 BUILD_JOBS ?= $(shell nproc 2>/dev/null || echo 1)
+TEST_JOBS ?= $(shell nproc 2>/dev/null || echo 1)
 MODEL_GEN_JOBS ?= 4
 CMAKE_BUILD_TYPE ?= Debug
 CMAKE ?= cmake
@@ -99,7 +100,7 @@ build: configure
 	$(CMAKE) --build $(BUILD_DIR) --parallel $(BUILD_JOBS)
 
 test: build
-	$(CTEST) --test-dir $(BUILD_DIR) --output-on-failure
+	$(CTEST) --test-dir $(BUILD_DIR) --output-on-failure -j $(TEST_JOBS)
 
 run: build
 	./$(BUILD_DIR)/src/cli/cuda_sim_run

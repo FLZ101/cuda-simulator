@@ -598,6 +598,20 @@ Comparison requirements:
 - verification: `models.llm_ops.runner_cpu` and
   `models.llm_ops.runner_sim` pass.
 
+- Made `make test TEST_JOBS=<n>` run CTest in parallel and ordered every
+  `models.*.runner_sim` test after its CPU-reference test.
+- files: `Makefile`, `tests/CMakeLists.txt`
+- verification: the three previously failing simulator tests
+  (`models.vector_add.runner_sim`, `models.matmul.runner_sim`, and
+  `models.mlp.runner_sim`) pass with `-j 4`.
+
+- Fixed the shared generated-model runner to load functions by the actual
+  Triton `.visible .entry` name instead of the logical kernel name. Triton can
+  decorate entry names with specialization suffixes, which made
+  `cuModuleGetFunction` return `CUDA_ERROR_NOT_FOUND`.
+- files: `tests/models/specs/_common.py`
+- verification: all 12 `models.*.runner_sim` tests pass with `-j 4`.
+
 ## Verification
 
 Commands run:

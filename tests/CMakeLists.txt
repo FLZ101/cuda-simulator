@@ -681,6 +681,9 @@ add_test(
           --core-dir $<TARGET_FILE_DIR:cudasim_core>
           --output-dir ${CMAKE_CURRENT_BINARY_DIR}/models/vector_add
 )
+set_tests_properties(models.vector_add.runner_sim PROPERTIES
+  DEPENDS models.vector_add.runner_cpu
+)
 
 add_custom_command(
   OUTPUT ${MATMUL_RUNNER_SRC}
@@ -729,6 +732,9 @@ add_test(
           --cuda $<TARGET_FILE:cuda_shim>
           --core-dir $<TARGET_FILE_DIR:cudasim_core>
           --output-dir ${CMAKE_CURRENT_BINARY_DIR}/models/matmul
+)
+set_tests_properties(models.matmul.runner_sim PROPERTIES
+  DEPENDS models.matmul.runner_cpu
 )
 
 set(MLP_RUNNER_SRC ${GENERATED_MODEL_DIR}/mlp_runner.cu)
@@ -782,6 +788,9 @@ add_test(
           --cuda $<TARGET_FILE:cuda_shim>
           --core-dir $<TARGET_FILE_DIR:cudasim_core>
           --output-dir ${CMAKE_CURRENT_BINARY_DIR}/models/mlp
+)
+set_tests_properties(models.mlp.runner_sim PROPERTIES
+  DEPENDS models.mlp.runner_cpu
 )
 
 set(MODULE_RUNNER_SRC ${GENERATED_MODEL_DIR}/module_runner.cu)
@@ -841,6 +850,9 @@ add_test(
           --cuda $<TARGET_FILE:cuda_shim>
           --core-dir $<TARGET_FILE_DIR:cudasim_core>
           --output-dir ${CMAKE_CURRENT_BINARY_DIR}/models/module
+)
+set_tests_properties(models.module.runner_sim PROPERTIES
+  DEPENDS models.module.runner_cpu
 )
 
 set(CONV_MODULE_RUNNER_SRC ${GENERATED_MODEL_DIR}/conv_module_runner.cu)
@@ -912,6 +924,9 @@ add_test(
           --core-dir $<TARGET_FILE_DIR:cudasim_core>
           --output-dir ${CMAKE_CURRENT_BINARY_DIR}/models/conv_module
 )
+set_tests_properties(models.conv_module.runner_sim PROPERTIES
+  DEPENDS models.conv_module.runner_cpu
+)
 
 set(RESNET_STEM_RUNNER_SRC ${GENERATED_MODEL_DIR}/resnet_stem_runner.cu)
 set(RESNET_STEM_MODEL_FIXTURE
@@ -981,6 +996,9 @@ add_test(
           --cuda $<TARGET_FILE:cuda_shim>
           --core-dir $<TARGET_FILE_DIR:cudasim_core>
           --output-dir ${CMAKE_CURRENT_BINARY_DIR}/models/resnet_stem
+)
+set_tests_properties(models.resnet_stem.runner_sim PROPERTIES
+  DEPENDS models.resnet_stem.runner_cpu
 )
 
 set(CNN_OPS_RUNNER_SRC ${GENERATED_MODEL_DIR}/cnn_ops_runner.cu)
@@ -1052,6 +1070,9 @@ add_test(
           --core-dir $<TARGET_FILE_DIR:cudasim_core>
           --output-dir ${CMAKE_CURRENT_BINARY_DIR}/models/cnn_ops
 )
+set_tests_properties(models.cnn_ops.runner_sim PROPERTIES
+  DEPENDS models.cnn_ops.runner_cpu
+)
 
 set(LLM_OPS_RUNNER_SRC ${GENERATED_MODEL_DIR}/llm_ops_runner.cu)
 set(LLM_OPS_MODEL_FIXTURE
@@ -1112,6 +1133,9 @@ add_test(
           --cuda $<TARGET_FILE:cuda_shim>
           --core-dir $<TARGET_FILE_DIR:cudasim_core>
           --output-dir ${CMAKE_CURRENT_BINARY_DIR}/models/llm_ops
+)
+set_tests_properties(models.llm_ops.runner_sim PROPERTIES
+  DEPENDS models.llm_ops.runner_cpu
 )
 
 set(GPT2_EMBEDDING_RUNNER_SRC ${GENERATED_MODEL_DIR}/gpt2_embedding_runner.cu)
@@ -1177,6 +1201,9 @@ add_test(
           --core-dir $<TARGET_FILE_DIR:cudasim_core>
           --output-dir ${CMAKE_CURRENT_BINARY_DIR}/models/gpt2_embedding
 )
+set_tests_properties(models.gpt2_embedding.runner_sim PROPERTIES
+  DEPENDS models.gpt2_embedding.runner_cpu
+)
 
 set(GPT2_ATTENTION_RUNNER_SRC ${GENERATED_MODEL_DIR}/gpt2_attention_runner.cu)
 set(GPT2_ATTENTION_MODEL_FIXTURE
@@ -1240,6 +1267,9 @@ add_test(
           --cuda $<TARGET_FILE:cuda_shim>
           --core-dir $<TARGET_FILE_DIR:cudasim_core>
           --output-dir ${CMAKE_CURRENT_BINARY_DIR}/models/gpt2_attention
+)
+set_tests_properties(models.gpt2_attention.runner_sim PROPERTIES
+  DEPENDS models.gpt2_attention.runner_cpu
 )
 
 set(GPT2_MULTIHEAD_RUNNER_SRC ${GENERATED_MODEL_DIR}/gpt2_multihead_runner.cu)
@@ -1308,6 +1338,9 @@ add_test(
           --core-dir $<TARGET_FILE_DIR:cudasim_core>
           --output-dir ${CMAKE_CURRENT_BINARY_DIR}/models/gpt2_multihead
 )
+set_tests_properties(models.gpt2_multihead.runner_sim PROPERTIES
+  DEPENDS models.gpt2_multihead.runner_cpu
+)
 
 set(GPT2_BLOCK_RUNNER_SRC ${GENERATED_MODEL_DIR}/gpt2_block_runner.cu)
 set(GPT2_BLOCK_MODEL_FIXTURE
@@ -1374,6 +1407,9 @@ add_test(
           --cuda $<TARGET_FILE:cuda_shim>
           --core-dir $<TARGET_FILE_DIR:cudasim_core>
           --output-dir ${CMAKE_CURRENT_BINARY_DIR}/models/gpt2_block
+)
+set_tests_properties(models.gpt2_block.runner_sim PROPERTIES
+  DEPENDS models.gpt2_block.runner_cpu
 )
 
 add_executable(runtime_api_smoke

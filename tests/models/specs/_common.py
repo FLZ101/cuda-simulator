@@ -24,6 +24,7 @@ if not hasattr(tl, "erf"):
     tl.erf = tl.math.erf
 
 BANNED_PATTERN = re.compile(r"\b(mma|wmma|ldmatrix|stmatrix|wgmma|tcgen05)\b")
+PTX_ENTRY_PATTERN = re.compile(r"\.visible\s+\.entry\s+([A-Za-z_$][\w$]*)")
 
 
 def strip_debug_sections(ptx: str) -> str:
@@ -51,6 +52,11 @@ def compile_kernel(kernel, grid, args, kwargs) -> str:
     if matches:
         raise RuntimeError(f"generated PTX contains tensor-core instructions: {matches}")
     return ptx
+
+
+def ptx_entry_name(ptx: str, fallback: str) -> str:
+    match = PTX_ENTRY_PATTERN.search(ptx)
+    return match.group(1) if match else fallback
 
 
 def runner_prelude() -> str:
@@ -231,8 +237,9 @@ def generate_native_runner(runner: Runner, output_path: pathlib.Path) -> None:
 
     # Load kernels.
     for index, kernel in enumerate(runner.kernels):
+        entry_name = ptx_entry_name(kernel.ptx, kernel.name)
         parts.append(
-            f'  CUfunction fn{index} = load_function(R"CUPTX({kernel.ptx})CUPTX", "{kernel.name}");\n'
+            f'  CUfunction fn{index} = load_function(R"CUPTX({kernel.ptx})CUPTX", "{entry_name}");\n'
         )
     parts.append(
         "  if ("
